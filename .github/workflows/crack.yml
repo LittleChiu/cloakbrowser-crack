@@ -1,0 +1,174 @@
+name: crack
+
+# Rebuilds a keyless CloakBrowser Manager for every platform the vendor ships.
+#
+# The license check lives in the engine, not in the manager: the engine binary
+# is patched so every license denial call site branches straight into the
+# enclosing function's epilogue instead of exiting, and the 31 s
+# fingerprint-table wait is shortened.  The manager is then repackaged with the
+# patched engine and a launcher stub that points it at the vendored engine.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: engine version ("" = latest)
+        required: false
+        default: ""
+      key:
+        description: license key used only to download the engine
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  macos:
+    runs-on: macos-14
+    strategy:
+      matrix:
+        target: [darwin-arm64, darwin-x64]
+    env:
+      ENGINE_VERSION: ${{ inputs.version }}
+      CB_KEY: ${{ inputs.key || secrets.CLOAKBROWSER_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: pip3 install --quiet capstone
+
+      - name: fetch release assets
+        run: |
+          set -euo pipefail
+          curl -fsSL -o manager.dmg \
+            "https://github.com/CloakHQ/CloakBrowser-Manager/releases/latest/download/CloakBrowser-Manager-universal.dmg"
+          ver=${ENGINE_VERSION:-$(curl -fsS https://cloakbrowser.dev/api/download/version | sed 's/.*"version":"\([^"]*\)".*/\1/')}
+          echo "engine $ver / ${{ matrix.target }}"
+          curl -fsSL --retry 3 -H "Authorization: Bearer $CB_KEY" \
+            -H "X-Platform: ${{ matrix.target }}" \
+            -o engine.tar.gz "https://cloakbrowser.dev/api/download/$ver"
+          mkdir engine && tar xzf engine.tar.gz -C engine
+
+      - name: derive patch plan
+        run: |
+          set -euo pipefail
+          FW="engine/Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/Current/Chromium Framework"
+          file "$FW"
+          python3 crack-ci/cloakcrack.py derive "$FW" --out plan.json
+          python3 crack-ci/cloakcrack.py patch  "$FW" --sites plan.json
+
+      - name: package
+        run: crack-ci/package/package.sh macos engine/Chromium.app out
+
+      - name: verify
+        run: crack-ci/package/verify.sh out/CloakBrowser\ Manager.app/Contents/Resources/engine/Chromium.app
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CloakBrowser-Manager-${{ matrix.target }}
+          path: out
+
+  windows:
+    runs-on: windows-latest
+    env:
+      ENGINE_VERSION: ${{ inputs.version }}
+      CB_KEY: ${{ inputs.key || secrets.CLOAKBROWSER_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: pip install --quiet capstone
+
+      - name: toolchain
+        run: choco install mingw -y --no-progress
+
+      - name: fetch release assets
+        run: |
+          set -euo pipefail
+          ver=$(curl -fsS https://cloakbrowser.dev/api/download/version | sed 's/.*"version":"\([^"]*\)".*/\1/')
+          [ -n "$ENGINE_VERSION" ] && ver=$ENGINE_VERSION
+          echo "engine $ver"
+          curl -fsSL --retry 3 -H "Authorization: Bearer $CB_KEY" \
+            -H "X-Platform: windows-x64" -o engine.zip "https://cloakbrowser.dev/api/download/$ver"
+          # the manager installs over this tree; the engine keeps its own dir
+          mkdir -p app/Engine && cd app/Engine && unzip -q ../../engine.zip && cd ../..
+          # the asset name carries the manager version: look it up
+          tag=$(curl -fsS https://api.github.com/repos/CloakHQ/CloakBrowser-Manager/releases/latest |
+                sed -n 's/.*"\(CloakBrowser-Manager-v[0-9.]*-setup\.exe\)".*/\1/p' | head -1)
+          curl -fsSL -o setup.exe \
+            "https://github.com/CloakHQ/CloakBrowser-Manager/releases/latest/download/$tag"
+
+      - name: install manager silently
+        run: |
+          # Inno Setup: /DIR must be absolute; the installer is not extractable
+          # with innoextract yet, so run it for real.
+          ./setup.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- /DIR="$(cygpath -w "$PWD/app")"
+          ls app
+
+      - name: derive patch plan
+        run: |
+          set -euo pipefail
+          DLL=app/Engine/chrome.dll
+          [ -f "$DLL" ] || DLL=$(find app -name chrome.dll | head -1)
+          file "$DLL"
+          python3 crack-ci/cloakcrack.py derive "$DLL" --out plan.json
+          python3 crack-ci/cloakcrack.py patch  "$DLL" --sites plan.json
+
+      - name: package
+        run: |
+          set -euo pipefail
+          crack-ci/package/package.sh windows app out
+
+      - name: verify
+        run: crack-ci/package/verify.sh out
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CloakBrowser-Manager-windows-x64
+          path: out
+
+  linux:
+    # The vendor publishes no Linux manager, so this ships the patched engine
+    # (plus the Dockerfile path) and verifies it headless.
+    runs-on: ubuntu-latest
+    env:
+      ENGINE_VERSION: ${{ inputs.version }}
+      CB_KEY: ${{ inputs.key || secrets.CLOAKBROWSER_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: pip install --quiet capstone
+
+      - name: deps
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libnss3 libatk1.0-0 libatk-bridge2.0-0 \
+            libcups2 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 \
+            libxrandr2 libgbm1 libpango-1.0-0 libcairo2 libasound2 libxshmfence1 \
+            fonts-liberation
+
+      - name: fetch engine
+        run: |
+          set -euo pipefail
+          ver=${ENGINE_VERSION:-$(curl -fsS https://cloakbrowser.dev/api/download/version | sed 's/.*"version":"\([^"]*\)".*/\1/')}
+          curl -fsSL --retry 3 -H "Authorization: Bearer $CB_KEY" \
+            -H "X-Platform: linux-x64" -o engine.tar.gz "https://cloakbrowser.dev/api/download/$ver"
+          mkdir engine && tar xzf engine.tar.gz -C engine
+          chmod +x engine/chrome
+
+      - name: derive patch plan
+        run: |
+          set -euo pipefail
+          python3 crack-ci/cloakcrack.py derive engine/chrome --out plan.json
+          python3 crack-ci/cloakcrack.py patch  engine/chrome --sites plan.json
+
+      - name: package
+        run: crack-ci/package/package.sh linux engine out
+
+      - name: verify
+        run: crack-ci/package/verify.sh out
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CloakBrowser-Manager-linux-x64
+          path: out
