@@ -53,35 +53,31 @@ static int dir_of(const char *argv0, char *out, size_t cap) {
 
 /* The engine is patched, so it never enforces a key.  The Manager itself still
  * resolves a licence_tier at startup and refuses to show the profile UI while
- * that is "none".  Seed a real (free) key plus a fresh validation-cache entry
- * into the cache dir on first run: the manager reads it from the cache dir and
- * leaves the UI alone, and the cached entry re-validates itself after a day.
+ * that is "none".  It only has to *believe* a key was validated, so the seeded
+ * key is fake and local: the manager checks its validation cache before the
+ * network, and the cache entry is stamped a century ahead, so it is never
+ * stale, never revalidates, never expires — and the key never reaches the
+ * engine (the manager hands it nothing for a file-sourced key).  The licence
+ * plan is reported as "pro" purely for the badge.
  *
- * A key stored in Settings is then blanked: the manager passes a stored key to
- * the engine, and a keyed engine enforces the licence seat cap (the bundled one
- * is a free single-seat key), denies the second profile, or takes a denial path
- * the engine patch does not cover when the key is malformed.  With no stored
- * key the manager uses the seeded file instead, which is never handed to the
- * engine — so launches stay keyless.
+ * A key stored in Settings is blanked: a stored key *is* handed to the engine,
+ * and a keyed engine enforces the licence seat cap, or takes denial paths the
+ * patch does not cover when the key is malformed.  File-sourced launches stay
+ * keyless, so every profile keeps working.
  *
- * Both values are baked at build time (package.sh passes them from the
- * CLOAKBROWSER_KEY secret), so the source tree never carries the key.  A
- * launcher built without one seeds nothing and the manager keeps its own key
- * path.  The key still ends up inside any shipped binary, which is expected. */
+ * The seed is rewritten on every start (not only when missing), so a package
+ * upgraded over an older one that seeded a real key drops that key and its
+ * cache.  Both macros can be overridden at build time (package.sh
+ * LAUNCHER_KEY / _SHA) to seed a real key instead; nothing shipped needs one. */
 #ifndef BUNDLED_LICENSE_KEY
-#define BUNDLED_LICENSE_KEY ""
+#define BUNDLED_LICENSE_KEY "cb_00000000000000000000000000000000"
 #endif
 #ifndef BUNDLED_LICENSE_SHA
-#define BUNDLED_LICENSE_SHA ""
+#define BUNDLED_LICENSE_SHA "0562cfc8017e11c6647c4d19648a7fc2c761b0762bf7810a7bedfa5ec69f9ae9"
 #endif
 
-static void write_if_missing(const char *path, const char *text) {
-  FILE *f = fopen(path, "rb");
-  if (f) {
-    fclose(f);
-    return;
-  }
-  f = fopen(path, "wb");
+static void write_file(const char *path, const char *text) {
+  FILE *f = fopen(path, "wb");
   if (!f) return;
   fwrite(text, 1, strlen(text), f);
   fclose(f);
@@ -153,13 +149,15 @@ static void seed_license(void) {
   mkdir(dir, 0700);
 #endif
   snprintf(path, sizeof path, "%s" SEP "license.key", dir);
-  write_if_missing(path, BUNDLED_LICENSE_KEY "\n");
+  write_file(path, BUNDLED_LICENSE_KEY "\n");
+  /* a century ahead: the manager's 24 h TTL never elapses, so the fake key is
+   * never sent to the licence server and cannot be rejected there */
   snprintf(json, sizeof json,
            "{\"key_sha256\": \"" BUNDLED_LICENSE_SHA "\", \"valid\": true, "
-           "\"plan\": \"free\", \"expires\": null, \"validated_at\": %ld}",
-           (long)time(NULL));
+           "\"plan\": \"pro\", \"expires\": null, \"validated_at\": %lld}",
+           (long long)time(NULL) + 100LL * 365 * 86400);
   snprintf(path, sizeof path, "%s" SEP ".license_cache", dir);
-  write_if_missing(path, json);
+  write_file(path, json);
 }
 
 int main(int argc, char **argv) {

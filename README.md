@@ -71,21 +71,25 @@ package/package.sh linux   /tmp/x86                         /tmp/out
 
 Each bundle gets a tiny `launcher` (compiled from `launcher.c` with the system
 compiler or mingw) that exports `CLOAKBROWSER_BINARY_PATH` and execs the engine in
-place, bypassing the manager's own binary-manifest check. It also seeds a valid
-cache entry for a free key into `~/.cloakbrowser` on first run: the manager needs
-one to leave its `license_tier == "none"` screen. Any key stored in Settings is
-blanked before the manager starts, so it falls back to the seeded file — and
-because the file is never handed to the engine, launches stay keyless. That
-matters twice: a malformed stored key denies before the patch is reached, and any
-key handed to the engine enforces the free key's single-seat cap.
+place, bypassing the manager's own binary-manifest check.
 
-The seeded key itself is **not** in the source tree: `package.sh` bakes it into
-the launcher from `LAUNCHER_KEY` (CI reads the `CLOAKBROWSER_KEY` secret, falling
-back to the dispatch `key` input) and derives its SHA. Builds made without it
-seed nothing. The key still ends up inside any shipped binary, as the engine
-download already requires one — rotating it is a secret update plus a rebuild, no
-code change. That makes the repository safe to publish: a dispatch needs write
-access, so the secret is only reachable by maintainers.
+The launcher also fixes the manager's own licence gate, which no engine patch can
+reach: it seeds a **fake, local** key (`cb_` + 32 zeros) plus a validation-cache
+entry stamped a century ahead, reported as plan "pro". The manager consults that
+cache before the network, so the key is never validated remotely, never
+revalidates and never expires. Because a file-sourced key is not
+injected into the engine, launches stay keyless — the free key's single-seat cap
+never applies and a second profile opens fine.
+
+Every key stored in Settings is blanked at each start (a stored key *is* pushed
+to the engine, where seats and malformed-key denials bite), and the seed files
+are rewritten on every launch so upgrading over an older package drops whatever
+it seeded before.
+
+Nothing in the shipped path needs the real key. CI still uses the
+`CLOAKBROWSER_KEY` secret only to download the engine; `LAUNCHER_KEY`/`_SHA` can
+bake a real key instead. The key inside any binary is public by nature, so
+rotating it is a secret update plus a rebuild, no code change.
 
 ## Verification
 
