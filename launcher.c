@@ -54,11 +54,15 @@ static int dir_of(const char *argv0, char *out, size_t cap) {
 /* The engine is patched, so it never enforces a key.  The Manager itself still
  * resolves a licence_tier at startup and refuses to show the profile UI while
  * that is "none".  Seed a real (free) key plus a fresh validation-cache entry
- * into the cache dir on first run, and export that key to the Manager.  The key
- * is exported because any key stored in Settings is otherwise used first, and a
- * malformed or expired one makes the engine deny before the patch is reached.
- * Settings keeps displaying the stored value; the cached entry re-validates
- * itself after a day. */
+ * into the cache dir on first run: the manager reads it from the cache dir and
+ * leaves the UI alone, and the cached entry re-validates itself after a day.
+ *
+ * A key stored in Settings is then blanked: the manager passes a stored key to
+ * the engine, and a keyed engine enforces the licence seat cap (the bundled one
+ * is a free single-seat key), denies the second profile, or takes a denial path
+ * the engine patch does not cover when the key is malformed.  With no stored
+ * key the manager uses the seeded file instead, which is never handed to the
+ * engine — so launches stay keyless. */
 #define BUNDLED_LICENSE_KEY "<baked-at-build>"
 #define BUNDLED_LICENSE_SHA "286b33018861895849bca547437f1b7b97eea22ab7f924c310a00766e11f702f"
 
@@ -74,6 +78,33 @@ static void write_if_missing(const char *path, const char *text) {
   fclose(f);
 }
 
+/* Blank the value of "license_key" in the manager's settings.json, keeping the
+ * rest of the file intact.  The manager treats an empty value as "not set". */
+static void forget_stored_key(const char *path) {
+  char buf[16384];
+  char *p, *q, *a, *b;
+  size_t n;
+  FILE *f = fopen(path, "rb");
+  if (!f) return;
+  n = fread(buf, 1, sizeof buf - 1, f);
+  fclose(f);
+  buf[n] = 0;
+  p = strstr(buf, "\"license_key\"");
+  if (!p) return;
+  q = strchr(p + 13, ':');
+  if (!q) return;
+  a = strchr(q, '"');
+  if (!a) return;
+  a++;
+  b = strchr(a, '"');
+  if (!b || a == b) return;
+  memmove(a, b, strlen(b) + 1);
+  f = fopen(path, "wb");
+  if (!f) return;
+  fwrite(buf, 1, strlen(buf), f);
+  fclose(f);
+}
+
 static void seed_license(void) {
   char dir[4200];
   char path[4400];
@@ -85,19 +116,25 @@ static void seed_license(void) {
   const char *home = getenv("HOME");
 #endif
 
-  if (!getenv("CLOAKBROWSER_LICENSE_KEY")) {
-#ifdef _WIN32
-    SetEnvironmentVariableA("CLOAKBROWSER_LICENSE_KEY", BUNDLED_LICENSE_KEY);
-#else
-    setenv("CLOAKBROWSER_LICENSE_KEY", BUNDLED_LICENSE_KEY, 1);
-#endif
-  }
-
   if (cache && *cache) {
     snprintf(dir, sizeof dir, "%s", cache);
   } else {
     if (!home || !*home) return;
     snprintf(dir, sizeof dir, "%s" SEP ".cloakbrowser", home);
+  }
+  if (home && *home) {
+#ifdef _WIN32
+    const char *local = getenv("LOCALAPPDATA");
+    if (local && *local) {
+      snprintf(path, sizeof path, "%s" SEP "CloakBrowser Manager" SEP
+               "settings.json", local);
+      forget_stored_key(path);
+    }
+#else
+    snprintf(path, sizeof path, "%s" SEP "Library" SEP "Application Support" SEP
+             "CloakBrowser Manager" SEP "settings.json", home);
+    forget_stored_key(path);
+#endif
   }
 #ifdef _WIN32
   CreateDirectoryA(dir, NULL);

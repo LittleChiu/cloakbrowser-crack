@@ -72,11 +72,12 @@ package/package.sh linux   /tmp/x86                         /tmp/out
 Each bundle gets a tiny `launcher` (compiled from `launcher.c` with the system
 compiler or mingw) that exports `CLOAKBROWSER_BINARY_PATH` and execs the engine in
 place, bypassing the manager's own binary-manifest check. It also seeds a valid
-cache entry for a free key into `~/.cloakbrowser` and exports that key to the
-manager on every run: the patched engine ignores the key, but the manager needs
-one to leave its `license_tier == "none"` screen. A key stored in Settings is
-overridden by the exported one, because a malformed or expired key otherwise
-makes the engine deny before the patch is reached.
+cache entry for a free key into `~/.cloakbrowser` on first run: the manager needs
+one to leave its `license_tier == "none"` screen. Any key stored in Settings is
+blanked before the manager starts, so it falls back to the seeded file — and
+because the file is never handed to the engine, launches stay keyless. That
+matters twice: a malformed stored key denies before the patch is reached, and any
+key handed to the engine enforces the free key's single-seat cap.
 
 ## Verification
 
