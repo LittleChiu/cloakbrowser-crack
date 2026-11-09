@@ -57,13 +57,6 @@ macos)
   esac
   chmod +x "$BIN"
   xattr -cr "$APP"
-  # deep signing trips over the nested playwright node binary: sign every
-  # Mach-O bottom-up first, then the bundle
-  find "$APP" -type f -perm -u+x | while read -r f; do
-    case "$(file -b "$f")" in
-    Mach-O*) codesign --force -s - "$f" >/dev/null 2>&1 || true ;;
-    esac
-  done
   # sign bottom-up: deep signing alone trips over the nested playwright node
   find "$APP" -type f -perm -u+x | while read -r f; do
     case "$(file -b "$f")" in
@@ -72,6 +65,12 @@ macos)
   done
   codesign --force -s - "$APP"
   codesign -v "$APP" && echo "signed ok"
+  # ship a compressed image: the tree itself is ~2.3x bigger and that is what
+  # gets uploaded/handed over
+  rm -f "$OUT.dmg"
+  hdiutil create -quiet -srcfolder "$APP" -format UDZO \
+    -volname "CloakBrowser Manager" "$OUT.dmg"
+  echo "image $(du -h "$OUT.dmg" | cut -f1) (tree $(du -sh "$APP" | cut -f1))"
   ;;
 
 windows)
