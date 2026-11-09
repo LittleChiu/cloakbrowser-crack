@@ -35,6 +35,7 @@ MINGW* | MSYS* | CYGWIN*)
   # The browser needs a drive-letter URL, not a Git Bash /tmp path.
   PAGE=$(cygpath -w "$TMP/fp.html")
   PAGE="file:///${PAGE//\\//}"
+  echo "verify page: $PAGE" >&2
   ;;
 *) BIN="$ROOT/chrome" ;;
 esac

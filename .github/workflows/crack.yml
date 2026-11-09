@@ -100,7 +100,9 @@ jobs:
 
   windows:
     needs: macos
-    if: inputs.platform != 'macos'
+    # A skipped need skips this job unless if uses a status function.
+    # windows-only skips macos, so that input has to opt in explicitly.
+    if: ${{ !cancelled() && inputs.platform != 'macos' && (inputs.platform == 'windows-only' || needs.macos.result == 'success') }}
     runs-on: windows-latest
     timeout-minutes: 40
     env:
