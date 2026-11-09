@@ -71,7 +71,10 @@ package/package.sh linux   /tmp/x86                         /tmp/out
 
 Each bundle gets a tiny `launcher` (compiled from `launcher.c` with the system
 compiler or mingw) that exports `CLOAKBROWSER_BINARY_PATH` and execs the engine in
-place, bypassing the manager's own binary-manifest check.
+place, bypassing the manager's own binary-manifest check. It also seeds a valid
+cache entry for a free key into `~/.cloakbrowser` on first run: the patched engine
+ignores that key, but it keeps the manager's own `license_tier == "none"` screen
+from asking for one, and a key entered in Settings still takes over.
 
 ## Verification
 

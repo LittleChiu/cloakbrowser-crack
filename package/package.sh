@@ -89,7 +89,12 @@ windows)
   [ -n "$BIN" ] || die "no manager executable found in $IN"
   cp -R "$IN"/. "$OUT"/
   BIN="$OUT/$(basename "$BIN")"
-  mv "$BIN" "$BIN.bin"
+  # launcher.exe looks up "CloakBrowser Manager.bin.exe". Appending .bin to
+  # the original name yields "CloakBrowser Manager.exe.bin", which it misses.
+  case "$BIN" in
+    *.exe) mv "$BIN" "${BIN%.exe}.bin.exe" ;;
+    *) mv "$BIN" "$BIN.bin" ;;
+  esac
   [ -f "$IN/Engine/chrome.exe" ] || die "engine missing: expected Engine/chrome.exe"
   # CLOAKBROWSER_BINARY_PATH must be absolute; the stub derives it per run.
   cc_out="$OUT/launcher.exe"
