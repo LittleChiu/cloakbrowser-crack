@@ -140,12 +140,17 @@ jobs:
           dl "https://cloakbrowser.dev/api/download/$ver" windows-x64 engine.zip
           # the manager installs over this tree; the engine keeps its own dir
           mkdir -p app/Engine && cd app/Engine && unzip -q ../../engine.zip && cd ../..
-          # the asset name carries the manager version: look it up
-          tag=$(curl -fsS -H "Authorization: Bearer $GH_API" \
+          # github.com/releases/download/<setup.exe> returns 504 from the
+          # release proxy. The asset API redirects to release-assets, which works.
+          asset=$(curl -fsS -H "Authorization: Bearer $GH_API" \
+                -H "Accept: application/vnd.github+json" \
                 https://api.github.com/repos/CloakHQ/CloakBrowser-Manager/releases/latest |
-                sed -n 's/.*"\(CloakBrowser-Manager-v[0-9.]*-setup\.exe\)".*/\1/p' | head -1)
-          curl -fsSL --retry 5 --retry-all-errors -o setup.exe \
-            "https://github.com/CloakHQ/CloakBrowser-Manager/releases/latest/download/$tag"
+                python3 -c 'import json,sys; rel=json.load(sys.stdin); print(next(a["url"] for a in rel["assets"] if a["name"].endswith("-setup.exe")))')
+          echo "setup.exe via $asset"
+          curl -fL --retry 8 --retry-all-errors --retry-delay 5 \
+            -H "Authorization: Bearer $GH_API" \
+            -H "Accept: application/octet-stream" \
+            -o setup.exe "$asset"
 
       - name: install manager silently
         timeout-minutes: 10
