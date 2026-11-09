@@ -5,7 +5,7 @@
 #   ./package.sh windows <installed-tree>              <out-dir>
 #   ./package.sh linux   <engine-dir>                  <out-dir>
 #
-# `macos`   expects the pristine DMG next to this tree (../manager.dmg) and a
+# `macos`   expects the pristine DMG somewhere above or in $PWD and a
 #           patched Chromium.app.
 # `windows` expects the tree produced by running the vendor installer silently
 #           (see the workflow); the engine is expected in <installed-tree>/Engine.
@@ -20,7 +20,12 @@ MODE=${1:?usage: package.sh <macos|windows|linux> <input> <out-dir>}
 IN=${2:?missing input}
 OUT=${3:?missing output dir}
 HERE=$(cd "$(dirname "$0")" && pwd)
-ROOT=$(cd "$HERE/../.." && pwd)
+# manager.dmg is looked up next to the script, its parent, or the invocation
+# directory: the tool is both used in-tree and from a standalone checkout
+dmg=
+for d in "$HERE/.." "$HERE/../.." "$PWD" "$PWD/.."; do
+  if [ -f "$d/manager.dmg" ]; then dmg=$(cd "$d" && pwd)/manager.dmg; break; fi
+done
 
 die() { echo "package: $*" >&2; exit 1; }
 [ -e "$IN" ] || die "input not found: $IN"
@@ -29,7 +34,7 @@ mkdir -p "$OUT"
 
 case "$MODE" in
 macos)
-  DMG="$ROOT/manager.dmg"
+  DMG="$dmg"
   [ -f "$DMG" ] || die "manager.dmg missing next to the tree"
   MNT=$(mktemp -d)
   hdiutil attach -nobrowse -readonly -mountpoint "$MNT" "$DMG" >/dev/null

@@ -76,14 +76,14 @@ jobs:
           set -euo pipefail
           FW="engine/Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/Current/Chromium Framework"
           file "$FW"
-          python3 crack-ci/cloakcrack.py derive "$FW" --out plan.json
-          python3 crack-ci/cloakcrack.py patch  "$FW" --sites plan.json
+          python3 cloakcrack.py derive "$FW" --out plan.json
+          python3 cloakcrack.py patch  "$FW" --sites plan.json
 
       - name: package
-        run: crack-ci/package/package.sh macos engine/Chromium.app out
+        run: package/package.sh macos engine/Chromium.app out
 
       - name: verify
-        run: crack-ci/package/verify.sh out/CloakBrowser\ Manager.app/Contents/Resources/engine/Chromium.app
+        run: package/verify.sh out/CloakBrowser\ Manager.app/Contents/Resources/engine/Chromium.app
 
       - uses: actions/upload-artifact@v4
         with:
@@ -146,16 +146,16 @@ jobs:
           DLL=app/Engine/chrome.dll
           [ -f "$DLL" ] || DLL=$(find app -name chrome.dll | head -1)
           file "$DLL"
-          python3 crack-ci/cloakcrack.py derive "$DLL" --out plan.json
-          python3 crack-ci/cloakcrack.py patch  "$DLL" --sites plan.json
+          python3 cloakcrack.py derive "$DLL" --out plan.json
+          python3 cloakcrack.py patch  "$DLL" --sites plan.json
 
       - name: package
         run: |
           set -euo pipefail
-          crack-ci/package/package.sh windows app out
+          package/package.sh windows app out
 
       - name: verify
-        run: crack-ci/package/verify.sh out
+        run: package/verify.sh out
 
       - uses: actions/upload-artifact@v4
         with:
@@ -206,14 +206,14 @@ jobs:
       - name: derive patch plan
         run: |
           set -euo pipefail
-          python3 crack-ci/cloakcrack.py derive engine/chrome --out plan.json
-          python3 crack-ci/cloakcrack.py patch  engine/chrome --sites plan.json
+          python3 cloakcrack.py derive engine/chrome --out plan.json
+          python3 cloakcrack.py patch  engine/chrome --sites plan.json
 
       - name: package
-        run: crack-ci/package/package.sh linux engine out
+        run: package/package.sh linux engine out
 
       - name: verify
-        run: crack-ci/package/verify.sh out
+        run: package/verify.sh out
 
       - uses: actions/upload-artifact@v4
         with:
