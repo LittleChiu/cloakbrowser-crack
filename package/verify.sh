@@ -16,6 +16,7 @@ set -uo pipefail
 ROOT=${1:?usage: verify.sh <engine-root>}
 HERE=$(cd "$(dirname "$0")" && pwd)
 TMP=$(mktemp -d)
+PAGE="file://$TMP/fp.html"
 trap 'rm -rf "$TMP" 2>/dev/null || true' EXIT
 
 RUN=()
@@ -29,7 +30,12 @@ Darwin)
     RUN=(arch -x86_64)
   fi
   ;;
-MINGW* | MSYS* | CYGWIN*) BIN="$ROOT/Engine/chrome.exe" ;;
+MINGW* | MSYS* | CYGWIN*)
+  BIN="$ROOT/Engine/chrome.exe"
+  # The browser needs a drive-letter URL, not a Git Bash /tmp path.
+  PAGE=$(cygpath -w "$TMP/fp.html")
+  PAGE="file:///${PAGE//\\//}"
+  ;;
 *) BIN="$ROOT/chrome" ;;
 esac
 [ -x "$BIN" ] || {
@@ -60,7 +66,7 @@ render() { # seed -> canvas hash
   HOME="$dir" TMPDIR="$dir" ${RUN[@]+"${RUN[@]}"} "$BIN" \
     --user-data-dir="$dir/u" --headless=new --dump-dom --no-sandbox \
     --no-first-run --virtual-time-budget=2000 \
-    --fingerprint="$1" "file://$TMP/fp.html" >"$out" 2>"$dir/stderr"
+    --fingerprint="$1" "$PAGE" >"$out" 2>"$dir/stderr"
   local status=$?
   echo "render $1 exit $status, $(wc -c <"$out") output bytes" >&2
   tail -20 "$dir/stderr" >&2

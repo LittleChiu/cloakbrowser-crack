@@ -19,6 +19,10 @@ on:
         description: license key used only to download the engine
         required: false
         default: ""
+      platform:
+        description: platform to build (all or windows-only)
+        required: false
+        default: all
 
 permissions:
   contents: read
@@ -29,6 +33,7 @@ defaults:
 
 jobs:
   macos:
+    if: inputs.platform != 'windows-only'
     runs-on: macos-latest
     strategy:
       max-parallel: 1
@@ -95,6 +100,7 @@ jobs:
 
   windows:
     needs: macos
+    if: inputs.platform != 'macos'
     runs-on: windows-latest
     timeout-minutes: 40
     env:
@@ -179,6 +185,7 @@ jobs:
 
 
   diag:
+    if: inputs.platform == 'all'
     runs-on: ubuntu-latest
     env:
       CB_KEY: ${{ inputs.key || secrets.CLOAKBROWSER_KEY }}
@@ -226,6 +233,7 @@ jobs:
 
   linux:
     needs: macos
+    if: inputs.platform == 'all'
     # The vendor publishes no Linux manager, so this ships the patched engine
     # (plus the Dockerfile path) and verifies it headless.
     runs-on: ubuntu-latest
