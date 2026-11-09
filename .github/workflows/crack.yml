@@ -198,8 +198,9 @@ jobs:
             local d; d=$(mktemp -d)
             HOME=$d TMPDIR=$d timeout 60 engine/chrome --user-data-dir=$d/u \
               --headless=new --dump-dom --no-sandbox --virtual-time-budget=2000 \
-              --fingerprint="$2" "file://$page" 2>"$d/err" | grep -oE '\{"cores".*?\}' | head -1
-            echo "[$1 seed=$2] status_file=$(head -c 120 "$d/status" 2>/dev/null)"
+              --fingerprint="$2" "file://$page" 2>"$d/err" | grep -oE '\{"cores".*?\}' | head -1 || true
+            echo "[$1 seed=$2] status_file=$(head -c 120 "$d/status" 2>/dev/null || true)"
+            echo "   err: $(head -c 200 "$d/err" 2>/dev/null | tr '\n' ' ' || true)"
             return 0
           }
           echo "== pristine unpatched"
