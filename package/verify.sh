@@ -16,7 +16,7 @@ set -uo pipefail
 ROOT=${1:?usage: verify.sh <engine-root>}
 HERE=$(cd "$(dirname "$0")" && pwd)
 TMP=$(mktemp -d)
-trap 'rm -rf "$TMP"' EXIT
+trap 'rm -rf "$TMP" 2>/dev/null || true' EXIT
 
 RUN=()
 case "$(uname -s)" in
@@ -53,12 +53,18 @@ render() { # seed -> canvas hash
   local dir="$TMP/run$1"
   mkdir -p "$dir"
   # --virtual-time-budget makes the dump deterministic; without it macOS can
-  # hang in teardown ("watchdog expired") and lose the output
+  # hang in teardown ("watchdog expired") and lose the output. Keep the exit
+  # status and stderr visible: an unlicensed engine produces no stdout, so the
+  # old pipeline made a launch failure indistinguishable from a missing match.
+  local out="$dir/stdout"
   HOME="$dir" TMPDIR="$dir" ${RUN[@]+"${RUN[@]}"} "$BIN" \
     --user-data-dir="$dir/u" --headless=new --dump-dom --no-sandbox \
     --no-first-run --virtual-time-budget=2000 \
-    --fingerprint="$1" "file://$TMP/fp.html" 2>/dev/null |
-    grep -o '{"canvas":[^}]*}' | head -1
+    --fingerprint="$1" "file://$TMP/fp.html" >"$out" 2>"$dir/stderr"
+  local status=$?
+  echo "render $1 exit $status, $(wc -c <"$out") output bytes" >&2
+  tail -20 "$dir/stderr" >&2
+  grep -o '{"canvas":[^}]*}' "$out" | head -1
 }
 
 fail=0
