@@ -62,9 +62,18 @@ static int dir_of(const char *argv0, char *out, size_t cap) {
  * is a free single-seat key), denies the second profile, or takes a denial path
  * the engine patch does not cover when the key is malformed.  With no stored
  * key the manager uses the seeded file instead, which is never handed to the
- * engine — so launches stay keyless. */
-#define BUNDLED_LICENSE_KEY "<baked-at-build>"
-#define BUNDLED_LICENSE_SHA "286b33018861895849bca547437f1b7b97eea22ab7f924c310a00766e11f702f"
+ * engine — so launches stay keyless.
+ *
+ * Both values are baked at build time (package.sh passes them from the
+ * CLOAKBROWSER_KEY secret), so the source tree never carries the key.  A
+ * launcher built without one seeds nothing and the manager keeps its own key
+ * path.  The key still ends up inside any shipped binary, which is expected. */
+#ifndef BUNDLED_LICENSE_KEY
+#define BUNDLED_LICENSE_KEY ""
+#endif
+#ifndef BUNDLED_LICENSE_SHA
+#define BUNDLED_LICENSE_SHA ""
+#endif
 
 static void write_if_missing(const char *path, const char *text) {
   FILE *f = fopen(path, "rb");
@@ -115,6 +124,8 @@ static void seed_license(void) {
 #else
   const char *home = getenv("HOME");
 #endif
+
+  if (!BUNDLED_LICENSE_KEY[0]) return;
 
   if (cache && *cache) {
     snprintf(dir, sizeof dir, "%s", cache);

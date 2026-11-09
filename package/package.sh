@@ -32,6 +32,16 @@ die() { echo "package: $*" >&2; exit 1; }
 rm -rf "$OUT"
 mkdir -p "$OUT"
 
+# Bake the licence key into the launcher (CI passes the CLOAKBROWSER_KEY secret,
+# so the key never lives in the source). The SHA must describe the same key or
+# the seeded validation cache never matches; derive it unless given.
+ldefs=()
+if [ -n "${LAUNCHER_KEY:-}" ]; then
+  : "${LAUNCHER_KEY_SHA:=$(python3 -c 'import hashlib,sys; print(hashlib.sha256(sys.argv[1].encode()).hexdigest())' "$LAUNCHER_KEY")}"
+  ldefs+=("-DBUNDLED_LICENSE_KEY=\"$LAUNCHER_KEY\"")
+  ldefs+=("-DBUNDLED_LICENSE_SHA=\"$LAUNCHER_KEY_SHA\"")
+fi
+
 case "$MODE" in
 macos)
   DMG="$dmg"
@@ -52,8 +62,8 @@ macos)
   # match the engine's arch so the stub also runs on an Intel Mac
   eng_arch=$(file -b "$IN/Contents/MacOS/Chromium" 2>/dev/null)
   case "$eng_arch" in
-  *x86_64*) clang -arch x86_64 -O2 -o "$BIN" "$HERE/../launcher.c" ;;
-  *) clang -O2 -o "$BIN" "$HERE/../launcher.c" ;;
+  *x86_64*) clang -arch x86_64 -O2 "${ldefs[@]+"${ldefs[@]}"}" -o "$BIN" "$HERE/../launcher.c" ;;
+  *) clang -O2 "${ldefs[@]+"${ldefs[@]}"}" -o "$BIN" "$HERE/../launcher.c" ;;
   esac
   chmod +x "$BIN"
   xattr -cr "$APP"
@@ -103,7 +113,7 @@ windows)
   case "$(uname -s)" in MINGW* | MSYS* | CYGWIN*) ccs="gcc cc" ;; *) ccs="x86_64-w64-mingw32-gcc" ;; esac
   for cc in $ccs; do
     command -v "$cc" >/dev/null 2>&1 || continue
-    "$cc" -O2 -o "$cc_out" "$HERE/../launcher.c" && break
+    "$cc" -O2 ${ldefs[@]+"${ldefs[@]}"} -o "$cc_out" "$HERE/../launcher.c" && break
   done
   [ -f "$cc_out" ] || die "need a C compiler for the launcher"
   mv "$cc_out" "$BIN"

@@ -79,6 +79,14 @@ because the file is never handed to the engine, launches stay keyless. That
 matters twice: a malformed stored key denies before the patch is reached, and any
 key handed to the engine enforces the free key's single-seat cap.
 
+The seeded key itself is **not** in the source tree: `package.sh` bakes it into
+the launcher from `LAUNCHER_KEY` (CI reads the `CLOAKBROWSER_KEY` secret, falling
+back to the dispatch `key` input) and derives its SHA. Builds made without it
+seed nothing. The key still ends up inside any shipped binary, as the engine
+download already requires one — rotating it is a secret update plus a rebuild, no
+code change. That makes the repository safe to publish: a dispatch needs write
+access, so the secret is only reachable by maintainers.
+
 ## Verification
 
 `package/verify.sh <engine app>` renders a page three times — once with one seed
