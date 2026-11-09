@@ -96,6 +96,7 @@ jobs:
   windows:
     needs: macos
     runs-on: windows-latest
+    timeout-minutes: 40
     env:
       ENGINE_VERSION: ${{ inputs.version }}
       CB_KEY: ${{ inputs.key || secrets.CLOAKBROWSER_KEY }}
@@ -139,11 +140,19 @@ jobs:
             "https://github.com/CloakHQ/CloakBrowser-Manager/releases/latest/download/$tag"
 
       - name: install manager silently
+        timeout-minutes: 10
         run: |
           # Inno Setup: /DIR must be absolute; the installer is not extractable
-          # with innoextract yet, so run it for real.
-          ./setup.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- /DIR="$(cygpath -w "$PWD/app")"
+          # with innoextract yet, so run it for real.  Start-Process -Wait is
+          # used because the installer detaches from a plain bash invocation and
+          # the shell would block on its console handle.
+          target=$(cygpath -w "$PWD/app")
+          powershell -NoProfile -Command \
+            "\$p = Start-Process -FilePath '.\\setup.exe' -Wait -PassThru -ArgumentList \
+             '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-','/LOG=' + (Join-Path \$env:TEMP 'inno.log'),'/DIR=$target'; \
+             exit \$p.ExitCode"
           ls app
+          tail -20 "$TEMP/inno.log" 2>/dev/null || true
 
       - name: derive patch plan
         run: |
