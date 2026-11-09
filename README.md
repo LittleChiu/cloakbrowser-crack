@@ -74,7 +74,10 @@ compiler or mingw) that exports `CLOAKBROWSER_BINARY_PATH` and execs the engine 
 place, bypassing the manager's own binary-manifest check. It also seeds a valid
 cache entry for a free key into `~/.cloakbrowser` on first run: the patched engine
 ignores that key, but it keeps the manager's own `license_tier == "none"` screen
-from asking for one, and a key entered in Settings still takes over.
+from asking for one, and a key entered in Settings still takes over. If the key
+stored in Settings is malformed (it does not start with `cb_`), the launcher
+exports the bundled one instead: a malformed key takes a denial path of its own
+that the engine patch does not cover.
 
 ## Verification
 

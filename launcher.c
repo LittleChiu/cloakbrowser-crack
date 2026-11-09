@@ -72,22 +72,67 @@ static void write_if_missing(const char *path, const char *text) {
   fclose(f);
 }
 
+/* A key typed into Settings beats the seeded file, and one that is not even
+ * key-shaped ("123") takes a denial path the engine patch does not cover.
+ * Returns 0 when the stored key is present but malformed, so the caller can
+ * put the bundled key in the environment where it wins.  An empty value means
+ * "cleared", which must keep following the seeded file. */
+static int settings_key_usable(const char *settings_path) {
+  FILE *f = fopen(settings_path, "rb");
+  char buf[16384];
+  size_t n;
+  char *p, *v;
+  if (!f) return 1;
+  n = fread(buf, 1, sizeof buf - 1, f);
+  fclose(f);
+  buf[n] = 0;
+  p = strstr(buf, "\"license_key\"");
+  if (!p) return 1;
+  p = strchr(p + 13, ':');
+  if (!p) return 1;
+  v = strchr(p, '"');
+  if (!v) return 1;
+  v++;
+  if (*v == '"') return 1;
+  if (!strncmp(v, "cb_", 3) && v[3] && v[3] != '"') return 1;
+  return 0;
+}
+
 static void seed_license(void) {
   char dir[4200];
   char path[4400];
   char json[512];
-  const char *home = getenv("CLOAKBROWSER_CACHE_DIR");
-
-  if (home && *home) {
-    snprintf(dir, sizeof dir, "%s", home);
-  } else {
+  const char *cache = getenv("CLOAKBROWSER_CACHE_DIR");
 #ifdef _WIN32
-    home = getenv("USERPROFILE");
+  const char *home = getenv("USERPROFILE");
 #else
-    home = getenv("HOME");
+  const char *home = getenv("HOME");
 #endif
+
+  if (cache && *cache) {
+    snprintf(dir, sizeof dir, "%s", cache);
+  } else {
     if (!home || !*home) return;
     snprintf(dir, sizeof dir, "%s" SEP ".cloakbrowser", home);
+  }
+
+  if (home && *home && !getenv("CLOAKBROWSER_LICENSE_KEY")) {
+    char settings[4400];
+#ifdef _WIN32
+    const char *local = getenv("LOCALAPPDATA");
+    if (local && *local) {
+      snprintf(settings, sizeof settings, "%s" SEP "CloakBrowser Manager" SEP
+               "settings.json", local);
+      if (!settings_key_usable(settings))
+        SetEnvironmentVariableA("CLOAKBROWSER_LICENSE_KEY", BUNDLED_LICENSE_KEY);
+    }
+#else
+    snprintf(settings, sizeof settings, "%s" SEP "Library" SEP
+             "Application Support" SEP "CloakBrowser Manager" SEP
+             "settings.json", home);
+    if (!settings_key_usable(settings))
+      setenv("CLOAKBROWSER_LICENSE_KEY", BUNDLED_LICENSE_KEY, 1);
+#endif
   }
 #ifdef _WIN32
   CreateDirectoryA(dir, NULL);
