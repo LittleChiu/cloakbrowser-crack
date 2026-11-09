@@ -31,7 +31,11 @@ Darwin)
   fi
   ;;
 MINGW* | MSYS* | CYGWIN*)
-  BIN="$ROOT/Engine/chrome.exe"
+  # The shipped chrome.exe is a licence-injecting wrapper around chrome.real.exe
+  # that also loses the --remote-debugging-pipe descriptors Playwright needs;
+  # drive the real binary so what verify proves is what a launch runs.
+  BIN="$ROOT/Engine/chrome.real.exe"
+  [ -x "$BIN" ] || BIN="$ROOT/Engine/chrome.exe"
   # The browser needs a drive-letter URL, not a Git Bash /tmp path.
   PAGE=$(cygpath -w "$TMP/fp.html")
   PAGE="file:///${PAGE//\\//}"
@@ -64,7 +68,7 @@ render() { # seed -> canvas hash
   # status and stderr visible: an unlicensed engine produces no stdout, so the
   # old pipeline made a launch failure indistinguishable from a missing match.
   local out="$dir/stdout"
-  HOME="$dir" TMPDIR="$dir" ${RUN[@]+"${RUN[@]}"} "$BIN" \
+  HOME="$dir" TMPDIR="$dir" CLOAKBROWSER_LICENSE_API=http://127.0.0.1:1 ${RUN[@]+"${RUN[@]}"} "$BIN" \
     --user-data-dir="$dir/u" --headless=new --dump-dom --no-sandbox \
     --no-first-run --virtual-time-budget=2000 \
     --fingerprint="$1" "$PAGE" >"$out" 2>"$dir/stderr"

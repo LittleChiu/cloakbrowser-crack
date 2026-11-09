@@ -16,6 +16,7 @@
 #ifdef _WIN32
 #include <windows.h>
 #else
+#include <dirent.h>
 #include <limits.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -75,6 +76,57 @@ static int dir_of(const char *argv0, char *out, size_t cap) {
 #ifndef BUNDLED_LICENSE_SHA
 #define BUNDLED_LICENSE_SHA "0562cfc8017e11c6647c4d19648a7fc2c761b0762bf7810a7bedfa5ec69f9ae9"
 #endif
+
+/* The engine defers CDP startup until its licence session is resolved; with a
+ * fake key that resolution is a slow network retry loop.  Point the engine at
+ * a dead endpoint so the session fails instantly (a transport denial the patch
+ * defuses) and the browser starts without touching the network.  The manager
+ * resolves its own tier from the seeded cache and never reads this variable. */
+#define DEAD_LICENSE_API "http://127.0.0.1:1"
+
+static void write_file(const char *path, const char *text);
+
+/* The wrapper hands the engine a denial-report file only when it can create
+ * ~/.cloakbrowser/denials.  Make that path an ordinary file so creation always
+ * fails: no denial file is ever minted, so the manager judges a launch by CDP
+ * alone — the engine keeps serving even where a denial path was defused. */
+static void block_denial_files(const char *dir) {
+#ifdef _WIN32
+  char path[4400], sub[4400];
+  WIN32_FIND_DATAA fd;
+  HANDLE h;
+  snprintf(path, sizeof path, "%s" SEP "denials", dir);
+  snprintf(sub, sizeof sub, "%s\\*", path);
+  h = FindFirstFileA(sub, &fd);
+  if (h != INVALID_HANDLE_VALUE) {
+    do {
+      char full[4600];
+      if (!strcmp(fd.cFileName, ".") || !strcmp(fd.cFileName, "..")) continue;
+      snprintf(full, sizeof full, "%s\\%s", path, fd.cFileName);
+      DeleteFileA(full);
+    } while (FindNextFileA(h, &fd));
+    FindClose(h);
+  }
+  RemoveDirectoryA(path);
+  write_file(path, "x\n");
+#else
+  char path[4400];
+  DIR *d;
+  struct dirent *e;
+  snprintf(path, sizeof path, "%s" SEP "denials", dir);
+  if ((d = opendir(path))) {
+    while ((e = readdir(d))) {
+      char full[4600];
+      if (!strcmp(e->d_name, ".") || !strcmp(e->d_name, "..")) continue;
+      snprintf(full, sizeof full, "%s/%s", path, e->d_name);
+      unlink(full);
+    }
+    closedir(d);
+    rmdir(path);
+  }
+  write_file(path, "x\n");
+#endif
+}
 
 static void write_file(const char *path, const char *text) {
   FILE *f = fopen(path, "wb");
@@ -158,6 +210,7 @@ static void seed_license(void) {
            (long long)time(NULL) + 100LL * 365 * 86400);
   snprintf(path, sizeof path, "%s" SEP ".license_cache", dir);
   write_file(path, json);
+  block_denial_files(dir);
 }
 
 int main(int argc, char **argv) {
@@ -172,7 +225,15 @@ int main(int argc, char **argv) {
   seed_license();
 
 #ifdef _WIN32
-  snprintf(engine, sizeof engine, "%s" SEP "Engine" SEP "chrome" EXE, dir);
+  SetEnvironmentVariableA("CLOAKBROWSER_LICENSE_API", DEAD_LICENSE_API);
+  /* Prefer the unwrapped binary: the shipped chrome.exe is only a licence
+   * injector that re-executes chrome.real.exe, and it swallows the
+   * --remote-debugging-pipe descriptors Playwright relies on, so the CDP
+   * handshake never completes (a 180 s launch timeout).  Skipping it costs
+   * nothing now that the engine is patched and licensing is defused. */
+  snprintf(engine, sizeof engine, "%s" SEP "Engine" SEP "chrome.real" EXE, dir);
+  if (GetFileAttributesA(engine) == INVALID_FILE_ATTRIBUTES)
+    snprintf(engine, sizeof engine, "%s" SEP "Engine" SEP "chrome" EXE, dir);
   /* Prefer the name package.sh now writes. Older packages appended .bin
    * after .exe, so fall back to that if the preferred file is absent. */
   snprintf(real, sizeof real, "%s" SEP "CloakBrowser Manager.bin" EXE, dir);
@@ -183,6 +244,7 @@ int main(int argc, char **argv) {
   snprintf(engine, sizeof engine, "%s" SEP ".." SEP "Resources" SEP "engine" SEP
                                 "Chromium.app" SEP "Contents" SEP "MacOS" SEP "Chromium", dir);
   snprintf(real, sizeof real, "%s" SEP "CloakBrowser Manager.bin", dir);
+  setenv("CLOAKBROWSER_LICENSE_API", DEAD_LICENSE_API, 1);
   setenv("CLOAKBROWSER_BINARY_PATH", engine, 1);
 #endif
 

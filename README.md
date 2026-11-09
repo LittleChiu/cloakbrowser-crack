@@ -91,6 +91,25 @@ Nothing in the shipped path needs the real key. CI still uses the
 bake a real key instead. The key inside any binary is public by nature, so
 rotating it is a secret update plus a rebuild, no code change.
 
+Two more things the launcher does so a *launch*, not just the manager, comes up:
+
+* It points `CLOAKBROWSER_LICENSE_API` at a dead loopback endpoint. The engine
+  resolves a licence session before serving CDP; with a key, that is a slow
+  network retry against a server that will reject it anyway. A dead endpoint
+  fails fast with the transport denial the patch already defuses, so launches
+  no longer depend on the licence host at all.
+* It replaces `~/.cloakbrowser/denials` with an ordinary *file*. The wrapper only
+  writes a denial report when it can create that directory, so making creation
+  fail guarantees the manager never reads `77` (missing key) out of a file and
+  aborts a perfectly good launch. Launches are then judged by CDP alone.
+
+On Windows the launcher also prefers `Engine/chrome.real.exe` over the shipped
+`Engine/chrome.exe`. The latter is only a licence injector that re-executes
+`.real`, and the re-exec drops the inherited `--remote-debugging-pipe`
+descriptors — Playwright's CDP handshake then never completes and every launch
+dies after a 180 s timeout. Skipping it costs nothing now that the engine is
+patched. (`verify.sh` drives `.real` for the same reason.)
+
 ## Verification
 
 `package/verify.sh <engine app>` renders a page three times — once with one seed

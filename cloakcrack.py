@@ -346,6 +346,27 @@ def as_jump(b: Bin, va: int, target: int) -> bytes:
     return b"\xE9" + struct.pack("<i", delta)
 
 
+def call_sites_of(b: Bin, target: int, lo: int, hi: int) -> list[int]:
+    """Addresses in [lo, hi) that hold `call rel32 target`.
+
+    The linear sweep desynchronises on big PE images, and a missed call site
+    is an unpatched deny path, so recover them with a byte scan: an E8 whose
+    rel32 lands exactly on `target` is a call with overwhelming probability.
+    """
+    seg = b.code()
+    blob = bytes(b.code_blob())
+    out: list[int] = []
+    i = max(0, lo - seg.addr)
+    end = min(len(blob) - 4, hi - seg.addr)
+    while i < end:
+        if blob[i] == 0xE8:
+            va = seg.addr + i
+            if va + 5 + struct.unpack("<i", blob[i + 1 : i + 5])[0] == target:
+                out.append(va)
+        i += 1
+    return out
+
+
 def loads_code(b: Bin, va: int) -> bool:
     """True if this instruction puts a small exit code in the first arg register."""
     if b.arch == ARM64:
@@ -835,7 +856,11 @@ def derive(b: Bin) -> dict:
     if not exits_ok:
         raise Fatal(f"no wrapper tail-calls exit (best {wrapper:#x})")
     wrappers = {wrapper}
-    site_set = set(sites)
+    # the sweep can drop call sites when it desynchronises, so scan for them
+    site_set = set(sites) | set(call_sites_of(b, wrapper, span_lo, span_hi))
+    missed = len(site_set) - len(sites)
+    if missed:
+        print(f"# sweep missed {missed} site(s); recovered by byte scan")
     # a logger funnelling into the wrapper is a deny path too
     changed = True
     while changed:
@@ -848,6 +873,7 @@ def derive(b: Bin) -> dict:
                 if len(wrappers) < 4:
                     wrappers.add(w2)
                     site_set |= set(s2)
+                    site_set |= set(call_sites_of(b, w2, span_lo, span_hi))
                     changed = True
     print("# wrappers " + ", ".join(hex(w) for w in sorted(wrappers)))
 
@@ -903,6 +929,8 @@ def wait_consts(b: Bin, lo: int, hi: int) -> list[dict]:
 def patch(b: Bin, manifest: dict) -> None:
     for p in manifest["patches"]:
         va, to = p["call"], p["to"]
+        if b.arch != ARM64 and b.read(va, 1) != b"\xe8":
+            raise Fatal(f"site {va:#x} is not a call")
         new = as_jump(b, va, to)
         off = b.fileoff(va)
         b.data[off : off + len(new)] = new

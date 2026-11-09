@@ -87,8 +87,6 @@ jobs:
           python3 cloakcrack.py patch  "$FW" --sites plan.json
 
       - name: package
-        env:
-          LAUNCHER_KEY: ${{ secrets.CLOAKBROWSER_KEY || inputs.key }}
         run: package/package.sh macos engine/Chromium.app out
 
       - name: verify
@@ -180,8 +178,6 @@ jobs:
           python3 cloakcrack.py patch  "$DLL" --sites plan.json
 
       - name: package
-        env:
-          LAUNCHER_KEY: ${{ secrets.CLOAKBROWSER_KEY || inputs.key }}
         run: |
           set -euo pipefail
           package/package.sh windows app out

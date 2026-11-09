@@ -105,7 +105,11 @@ windows)
     *.exe) mv "$BIN" "${BIN%.exe}.bin.exe" ;;
     *) mv "$BIN" "$BIN.bin" ;;
   esac
-  [ -f "$IN/Engine/chrome.exe" ] || die "engine missing: expected Engine/chrome.exe"
+  # The launcher prefers chrome.real.exe (the shipped chrome.exe is a licence
+  # injector whose re-exec drops the --remote-debugging-pipe descriptors), so the
+  # wrapper is only a fallback.
+  [ -f "$IN/Engine/chrome.exe" ] || [ -f "$IN/Engine/chrome.real.exe" ] ||
+    die "engine missing: expected Engine/chrome.exe or Engine/chrome.real.exe"
   # CLOAKBROWSER_BINARY_PATH must be absolute; the stub derives it per run.
   cc_out="$OUT/launcher.exe"
   # cross-compile on Linux/macOS; on a Windows runner the native gcc already
