@@ -38,6 +38,7 @@ jobs:
     env:
       ENGINE_VERSION: ${{ inputs.version }}
       CB_KEY: ${{ inputs.key || secrets.CLOAKBROWSER_KEY }}
+      GH_API: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
       - run: pip3 install --quiet --break-system-packages capstone
@@ -61,10 +62,11 @@ jobs:
             return 1
           }
           # asset names carry the manager version: resolve them
-          tag=$(curl -fsS https://api.github.com/repos/CloakHQ/CloakBrowser-Manager/releases/latest |
+          tag=$(curl -fsS -H "Authorization: Bearer $GH_API" \
+                https://api.github.com/repos/CloakHQ/CloakBrowser-Manager/releases/latest |
                 sed -n 's/.*"\(CloakBrowser-Manager-v[0-9.]*-universal\.dmg\)".*/\1/p' | head -1)
           [ -n "$tag" ] || { echo "no dmg asset in the latest release"; exit 1; }
-          curl -fsSL -o manager.dmg \
+          curl -fsSL --retry 5 --retry-all-errors -o manager.dmg \
             "https://github.com/CloakHQ/CloakBrowser-Manager/releases/latest/download/$tag"
           ver=${ENGINE_VERSION:-$(curl -fsS https://cloakbrowser.dev/api/download/version | sed 's/.*"version":"\([^"]*\)".*/\1/')}
           echo "engine $ver / ${{ matrix.target }}"
@@ -97,6 +99,7 @@ jobs:
     env:
       ENGINE_VERSION: ${{ inputs.version }}
       CB_KEY: ${{ inputs.key || secrets.CLOAKBROWSER_KEY }}
+      GH_API: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
       - run: pip install --quiet --break-system-packages capstone
@@ -129,9 +132,10 @@ jobs:
           # the manager installs over this tree; the engine keeps its own dir
           mkdir -p app/Engine && cd app/Engine && unzip -q ../../engine.zip && cd ../..
           # the asset name carries the manager version: look it up
-          tag=$(curl -fsS https://api.github.com/repos/CloakHQ/CloakBrowser-Manager/releases/latest |
+          tag=$(curl -fsS -H "Authorization: Bearer $GH_API" \
+                https://api.github.com/repos/CloakHQ/CloakBrowser-Manager/releases/latest |
                 sed -n 's/.*"\(CloakBrowser-Manager-v[0-9.]*-setup\.exe\)".*/\1/p' | head -1)
-          curl -fsSL -o setup.exe \
+          curl -fsSL --retry 5 --retry-all-errors -o setup.exe \
             "https://github.com/CloakHQ/CloakBrowser-Manager/releases/latest/download/$tag"
 
       - name: install manager silently
@@ -195,7 +199,8 @@ jobs:
             HOME=$d TMPDIR=$d timeout 60 engine/chrome --user-data-dir=$d/u \
               --headless=new --dump-dom --no-sandbox --virtual-time-budget=2000 \
               --fingerprint="$2" "file://$page" 2>"$d/err" | grep -oE '\{"cores".*?\}' | head -1
-            echo "[$1 seed=$2] status_file=$(cat "$d/status" 2>/dev/null | head -c 120)"
+            echo "[$1 seed=$2] status_file=$(head -c 120 "$d/status" 2>/dev/null)"
+            return 0
           }
           echo "== pristine unpatched"
           CLOAKBROWSER_LICENSE_STATUS_FILE=$PWD/s1 run pristine 111222
@@ -216,6 +221,7 @@ jobs:
     env:
       ENGINE_VERSION: ${{ inputs.version }}
       CB_KEY: ${{ inputs.key || secrets.CLOAKBROWSER_KEY }}
+      GH_API: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
       - run: pip install --quiet --break-system-packages capstone
