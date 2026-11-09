@@ -147,10 +147,11 @@ jobs:
           # used because the installer detaches from a plain bash invocation and
           # the shell would block on its console handle.
           target=$(cygpath -w "$PWD/app")
-          powershell -NoProfile -Command \
-            "\$p = Start-Process -FilePath '.\\setup.exe' -Wait -PassThru -ArgumentList \
-             '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-','/LOG=' + (Join-Path \$env:TEMP 'inno.log'),'/DIR=$target'; \
-             exit \$p.ExitCode"
+          logf=$(cygpath -w "$TEMP/inno.log")
+          powershell -NoProfile -Command "
+            \$a = @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-', \"/LOG=$logf\", \"/DIR=$target\")
+            \$p = Start-Process -FilePath '.\\setup.exe' -Wait -PassThru -ArgumentList \$a
+            exit \$p.ExitCode"
           ls app
           tail -20 "$TEMP/inno.log" 2>/dev/null || true
 
