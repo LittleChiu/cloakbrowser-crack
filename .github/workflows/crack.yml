@@ -32,6 +32,7 @@ jobs:
     runs-on: macos-latest
     strategy:
       max-parallel: 1
+      fail-fast: false
       matrix:
         target: [darwin-arm64, darwin-x64]
     env:
@@ -59,8 +60,12 @@ jobs:
             echo "download $plat failed" >&2
             return 1
           }
+          # asset names carry the manager version: resolve them
+          tag=$(curl -fsS https://api.github.com/repos/CloakHQ/CloakBrowser-Manager/releases/latest |
+                sed -n 's/.*"\(CloakBrowser-Manager-v[0-9.]*-universal\.dmg\)".*/\1/p' | head -1)
+          [ -n "$tag" ] || { echo "no dmg asset in the latest release"; exit 1; }
           curl -fsSL -o manager.dmg \
-            "https://github.com/CloakHQ/CloakBrowser-Manager/releases/latest/download/CloakBrowser-Manager-universal.dmg"
+            "https://github.com/CloakHQ/CloakBrowser-Manager/releases/latest/download/$tag"
           ver=${ENGINE_VERSION:-$(curl -fsS https://cloakbrowser.dev/api/download/version | sed 's/.*"version":"\([^"]*\)".*/\1/')}
           echo "engine $ver / ${{ matrix.target }}"
           dl "https://cloakbrowser.dev/api/download/$ver" ${{ matrix.target }} engine.tar.gz
