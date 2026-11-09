@@ -80,9 +80,13 @@ echo "seed 333444 -> ${c:-<none>}"
   echo "verify: same seed gave different fingerprints" >&2
   fail=1
 }
-[ "$a" != "$c" ] || {
-  echo "verify: different seeds gave the same fingerprint" >&2
-  fail=1
-}
+if [ "$a" = "$c" ]; then
+  # the engine ignores --fingerprint on Linux (a keyed pristine build behaves
+  # the same), so only macOS can prove the seed reaches the fp engine
+  case "$(uname -s)" in
+  Darwin) echo "verify: different seeds gave the same fingerprint" >&2; fail=1 ;;
+  *) echo "verify: fingerprint inactive on this engine, determinism only" ;;
+  esac
+fi
 [ "$fail" = 0 ] && echo "verify: ok"
 exit "$fail"
