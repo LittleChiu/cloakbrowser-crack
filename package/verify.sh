@@ -14,6 +14,7 @@
 set -uo pipefail
 
 ROOT=${1:?usage: verify.sh <engine-root>}
+RENDER_TIMEOUT=${RENDER_TIMEOUT:-90}
 HERE=$(cd "$(dirname "$0")" && pwd)
 TMP=$(mktemp -d)
 PAGE="file://$TMP/fp.html"
@@ -71,7 +72,24 @@ render() { # seed -> canvas hash
   HOME="$dir" TMPDIR="$dir" CLOAKBROWSER_LICENSE_API=http://127.0.0.1:1 ${RUN[@]+"${RUN[@]}"} "$BIN" \
     --user-data-dir="$dir/u" --headless=new --dump-dom --no-sandbox \
     --no-first-run --virtual-time-budget=2000 \
-    --fingerprint="$1" "$PAGE" >"$out" 2>"$dir/stderr"
+    --fingerprint="$1" "$PAGE" >"$out" 2>"$dir/stderr" &
+  local pid=$!
+  # under Rosetta a launch can wedge in teardown and never return; bound each
+  # render so a hang is a failed check, not a job that sits until the timeout
+  local waited=0
+  while kill -0 "$pid" 2>/dev/null; do
+    if [ "$waited" -ge "$RENDER_TIMEOUT" ]; then
+      kill -TERM "$pid" 2>/dev/null
+      sleep 2
+      kill -KILL "$pid" 2>/dev/null
+      wait "$pid" 2>/dev/null
+      echo "render $1 timed out after ${RENDER_TIMEOUT}s" >&2
+      return 0
+    fi
+    sleep 1
+    waited=$((waited + 1))
+  done
+  wait "$pid"
   local status=$?
   echo "render $1 exit $status, $(wc -c <"$out") output bytes" >&2
   tail -20 "$dir/stderr" >&2
