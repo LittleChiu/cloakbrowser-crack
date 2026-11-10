@@ -40,6 +40,8 @@ jobs:
       fail-fast: false
       matrix:
         target: [darwin-arm64, darwin-x64]
+    outputs:
+      engine_version: ${{ steps.ver.outputs.engine_version }}
     env:
       ENGINE_VERSION: ${{ inputs.version }}
       CB_KEY: ${{ inputs.key || secrets.CLOAKBROWSER_KEY }}
@@ -74,6 +76,7 @@ jobs:
           curl -fsSL --retry 5 --retry-all-errors -o manager.dmg \
             "https://github.com/CloakHQ/CloakBrowser-Manager/releases/latest/download/$tag"
           ver=${ENGINE_VERSION:-$(curl -fsS https://cloakbrowser.dev/api/download/version | sed 's/.*"version":"\([^"]*\)".*/\1/')}
+          echo "engine_version=$ver" >> "$GITHUB_OUTPUT"
           echo "engine $ver / ${{ matrix.target }}"
           dl "https://cloakbrowser.dev/api/download/$ver" ${{ matrix.target }} engine.tar.gz
           mkdir engine && tar xzf engine.tar.gz -C engine
@@ -316,3 +319,61 @@ jobs:
         with:
           name: CloakBrowser-Manager-${{ matrix.target }}
           path: out
+
+  release:
+    # Publishes one GitHub release per engine version once every platform
+    # built green. The tag is `v<engine>-crack.<n>`; re-running for the same
+    # engine version appends to (or rolls) the same release instead of
+    # failing on a taken tag.
+    needs: [macos, windows, linux]
+    if: ${{ !cancelled() && (needs.macos.result == 'success' || needs.macos.result == 'skipped') && needs.windows.result == 'success' && (needs.linux.result == 'success' || inputs.platform == 'windows-only') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+
+      - name: collect release assets
+        run: |
+          set -euo pipefail
+          cd dist
+          ls -d */
+          for d in CloakBrowser-Manager-darwin-*; do
+            [ -d "$d" ] && cp "$d/out.dmg" "$d.dmg"
+          done
+          [ -d CloakBrowser-Manager-windows-x64 ] &&
+            (cd CloakBrowser-Manager-windows-x64 && zip -qr ../CloakBrowser-Manager-windows-x64.zip .)
+          for d in CloakBrowser-Manager-linux-*; do
+            [ -d "$d" ] && tar czf "$d.tar.gz" -C "$d" .
+          done
+          mkdir -p ../assets && mv CloakBrowser-Manager-*.dmg CloakBrowser-Manager-windows-x64.zip \
+            CloakBrowser-Manager-linux-*.tar.gz ../assets/ 2>/dev/null || true
+          ls -la ../assets/
+          [ -n "$(ls -A ../assets/)" ] || { echo "no release assets collected"; exit 1; }
+
+      - name: resolve tag
+        id: tag
+        run: |
+          set -euo pipefail
+          ver=${{ inputs.version || needs.macos.outputs.engine_version }}
+          # windows-only builds skip macos, which is where the engine version
+          # is normally resolved; fall back to the API like the other jobs do
+          [ -n "$ver" ] || ver=$(curl -fsS https://cloakbrowser.dev/api/download/version | sed 's/.*"version":"\([^"]*\)".*/\1/')
+          # the same engine version can be rebuilt: roll crack.<n> instead of
+          # colliding with a taken tag
+          n=1
+          while gh release view "v$ver-crack.$n" >/dev/null 2>&1; do n=$((n+1)); done
+          echo "tag=v$ver-crack.$n" >> "$GITHUB_OUTPUT"
+
+      - name: publish
+        run: |
+          gh release create "$tag" assets/* \
+            --title "CloakBrowser crack ($tag)" \
+            --notes "$notes"
+        env:
+          tag: ${{ steps.tag.outputs.tag }}
+          notes: ${{ format('Keyless CloakBrowser builds for engine {0}. Engines are patched from signatures; the manager is the vendor one with a launcher shim (see repo README).', needs.macos.outputs.engine_version) }}

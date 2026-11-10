@@ -159,7 +159,7 @@ renderer can hang in teardown and drop its output.
 
 ## CI
 
-`.github/workflows/crack.yml` runs three jobs on push:
+`.github/workflows/crack.yml` runs four jobs:
 
 * `macos-latest` matrix `[darwin-arm64, darwin-x64]` — derive, patch, package,
   verify; the x64 leg runs the verification under Rosetta.
@@ -168,6 +168,10 @@ renderer can hang in teardown and drop its output.
 * `ubuntu-latest` matrix `[linux-x64, linux-arm64]` — patch the ELF and ship it
   with `run-linux.sh`; the arm64 leg runs the whole pipeline under qemu-user
   (binfmt), so its artifacts are built and verified, not just cross-patched.
+* `release` — after every platform builds green, publishes one GitHub release
+  tagged `v<engine>-crack.<n>` (the counter rolls on rebuilds of the same
+  engine version). Assets: the two darwin dmg, a windows zip and linux
+  tarballs per architecture.
 
 Runtime behaviour is CI-only for Windows (static CRT means no `exit` import, so the
 PE path relies on the indirect-call + `int3` terminating rule and was validated
