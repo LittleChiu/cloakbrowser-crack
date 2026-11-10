@@ -105,9 +105,10 @@ jobs:
 
   windows:
     needs: macos
-    # A skipped need skips this job unless if uses a status function.
-    # windows-only skips macos, so that input has to opt in explicitly.
-    if: ${{ !cancelled() && inputs.platform != 'macos' && (inputs.platform == 'windows-only' || needs.macos.result == 'success') }}
+    # needs: macos is for download serialisation (one licence seat), not for
+    # correctness, so a failed macOS leg must not skip this one. A skipped
+    # need skips a plain job, so the status function has to opt back in.
+    if: ${{ !cancelled() && inputs.platform != 'macos' && (inputs.platform == 'windows-only' || needs.macos.result != 'cancelled') }}
     runs-on: windows-latest
     timeout-minutes: 40
     env:
@@ -246,7 +247,9 @@ jobs:
 
   linux:
     needs: macos
-    if: inputs.platform == 'all'
+    # same as windows: wait for the mac leg only to serialise downloads, not
+    # because the result is needed
+    if: ${{ !cancelled() && inputs.platform == 'all' }}
     # The vendor publishes no Linux manager, so this ships the patched engine
     # (plus the Dockerfile path) and verifies it headless under qemu.  Both
     # architectures use the same signature derivation; only the ELF machine
