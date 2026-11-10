@@ -275,18 +275,20 @@ jobs:
           # libasound2 is libasound2t64 from 24.04 on
           sudo apt-get install -y -qq libasound2t64 || sudo apt-get install -y -qq libasound2
           # arm64 leg: the runner is x86_64, so the engine only runs under
-          # qemu-user.  The hosted image ships qemu-user-static and binaries
-          # already registered; only repair it when aarch64 does not execute.
+          # qemu-user.  The hosted image usually already has aarch64 registered;
+          # only fix it up when it does not.  qemu-user-static is gone from
+          # 24.04 (split into per-format packages), so try the known names.
+          if [ "$TARGET" = linux-arm64 ] && ! ls /proc/sys/fs/binfmt_misc/qemu-aarch64 >/dev/null 2>&1; then
+            for pkg in qemu-user-static qemu-user-static-binfmt qemu-user qemu-user-binfmt; do
+              sudo apt-get install -y -qq "$pkg" && break
+            done
+            sudo update-binfmts --enable qemu-aarch64 || true
+          fi
           if [ "$TARGET" = linux-arm64 ]; then
-            if ! ls /proc/sys/fs/binfmt_misc/qemu-aarch64 >/dev/null 2>&1; then
-              sudo apt-get install -y -qq qemu-user-static || true
-              sudo update-binfmts --enable qemu-aarch64 || true
-            fi
-            # the pipeline is pointless if the kernel cannot run the engine:
-            # fail here with the reason instead of a confusing exec error later
-            sudo apt-get install -y -qq qemu-user-static
-            ls /proc/sys/fs/binfmt_misc/ || true
-            file /usr/bin/qemu-aarch64-static || true
+            # say what the kernel actually has; a missing entry fails the run
+            # here with a clear message rather than as an opaque exec error
+            ls /proc/sys/fs/binfmt_misc/ 2>/dev/null || true
+            command -v qemu-aarch64-static && file "$(command -v qemu-aarch64-static)" || true
           fi
 
       - name: fetch engine
