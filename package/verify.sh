@@ -14,7 +14,7 @@
 set -uo pipefail
 
 ROOT=${1:?usage: verify.sh <engine-root>}
-RENDER_TIMEOUT=${RENDER_TIMEOUT:-90}
+RENDER_TIMEOUT=${RENDER_TIMEOUT:-240}
 HERE=$(cd "$(dirname "$0")" && pwd)
 TMP=$(mktemp -d)
 PAGE="file://$TMP/fp.html"
@@ -61,9 +61,8 @@ try{
 </script></body></html>
 HTML
 
-render() { # seed -> canvas hash
-  local dir="$TMP/run$1"
-  mkdir -p "$dir"
+render_once() { # seed dir -> canvas hash; 0 = produced output
+  local seed=$1 dir=$2
   # --virtual-time-budget makes the dump deterministic; without it macOS can
   # hang in teardown ("watchdog expired") and lose the output. Keep the exit
   # status and stderr visible: an unlicensed engine produces no stdout, so the
@@ -72,7 +71,7 @@ render() { # seed -> canvas hash
   HOME="$dir" TMPDIR="$dir" CLOAKBROWSER_LICENSE_API=http://127.0.0.1:1 ${RUN[@]+"${RUN[@]}"} "$BIN" \
     --user-data-dir="$dir/u" --headless=new --dump-dom --no-sandbox \
     --no-first-run --virtual-time-budget=2000 \
-    --fingerprint="$1" "$PAGE" >"$out" 2>"$dir/stderr" &
+    --fingerprint="$seed" "$PAGE" >"$out" 2>"$dir/stderr" &
   local pid=$!
   # under Rosetta a launch can wedge in teardown and never return; bound each
   # render so a hang is a failed check, not a job that sits until the timeout
@@ -83,17 +82,38 @@ render() { # seed -> canvas hash
       sleep 2
       kill -KILL "$pid" 2>/dev/null
       wait "$pid" 2>/dev/null
-      echo "render $1 timed out after ${RENDER_TIMEOUT}s" >&2
-      return 0
+      echo "render $seed timed out after ${RENDER_TIMEOUT}s" >&2
+      return 1
     fi
     sleep 1
     waited=$((waited + 1))
   done
   wait "$pid"
   local status=$?
-  echo "render $1 exit $status, $(wc -c <"$out") output bytes" >&2
+  echo "render $seed exit $status, $(wc -c <"$out") output bytes" >&2
   tail -20 "$dir/stderr" >&2
-  grep -o '{"canvas":[^}]*}' "$out" | head -1
+  local got
+  got=$(grep -o '{"canvas":[^}]*}' "$out" | head -1)
+  [ -n "$got" ] || return 1
+  printf '%s' "$got"
+}
+
+render() { # seed -> canvas hash
+  local dir="$TMP/run$1"
+  local got
+  # the first x64 render on a fresh runner pays a full Rosetta translate and
+  # can blow even a generous bound; one retry after a kill leaves the warm
+  # cache behind and only a genuine hang repeats
+  for attempt in 1 2; do
+    mkdir -p "$dir"
+    if got=$(render_once "$1" "$dir"); then
+      printf '%s' "$got"
+      return 0
+    fi
+    echo "render $1 attempt $attempt produced nothing" >&2
+    rm -rf "$dir"
+  done
+  return 0
 }
 
 fail=0
