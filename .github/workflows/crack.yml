@@ -369,6 +369,7 @@ jobs:
           # colliding with a taken tag
           n=1
           while gh release view "v$ver-crack.$n" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; do n=$((n+1)); done
+          echo "ver=$ver" >> "$GITHUB_OUTPUT"
           echo "tag=v$ver-crack.$n" >> "$GITHUB_OUTPUT"
 
       - name: publish
@@ -379,4 +380,4 @@ jobs:
             --notes "$notes"
         env:
           tag: ${{ steps.tag.outputs.tag }}
-          notes: ${{ format('Keyless CloakBrowser builds for engine {0}. Engines are patched from signatures; the manager is the vendor one with a launcher shim (see repo README).', needs.macos.outputs.engine_version) }}
+          notes: ${{ format('Keyless CloakBrowser builds for engine {0}. Engines are patched from signatures; the manager is the vendor one with a launcher shim (see repo README). macOS images are unsigned, so right-click open on first launch.', steps.tag.outputs.ver) }}
