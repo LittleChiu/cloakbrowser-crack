@@ -275,11 +275,18 @@ jobs:
           # libasound2 is libasound2t64 from 24.04 on
           sudo apt-get install -y -qq libasound2t64 || sudo apt-get install -y -qq libasound2
           # arm64 leg: the runner is x86_64, so the engine only runs under
-          # qemu-user.  binfmt registration is skipped on runners that already
-          # have aarch64 enabled.
-          if [ "$TARGET" = linux-arm64 ] && ! ls /proc/sys/fs/binfmt_misc/qemu-aarch64 >/dev/null 2>&1; then
+          # qemu-user.  The hosted image ships qemu-user-static and binaries
+          # already registered; only repair it when aarch64 does not execute.
+          if [ "$TARGET" = linux-arm64 ]; then
+            if ! ls /proc/sys/fs/binfmt_misc/qemu-aarch64 >/dev/null 2>&1; then
+              sudo apt-get install -y -qq qemu-user-static || true
+              sudo update-binfmts --enable qemu-aarch64 || true
+            fi
+            # the pipeline is pointless if the kernel cannot run the engine:
+            # fail here with the reason instead of a confusing exec error later
             sudo apt-get install -y -qq qemu-user-static
-            sudo update-binfmts --enable qemu-aarch64 || true
+            ls /proc/sys/fs/binfmt_misc/ || true
+            file /usr/bin/qemu-aarch64-static || true
           fi
 
       - name: fetch engine
