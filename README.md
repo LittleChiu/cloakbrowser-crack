@@ -165,14 +165,25 @@ renderer can hang in teardown and drop its output.
   verify; the x64 leg runs the verification under Rosetta.
 * `windows-latest` — silent Inno install of the vendor manager, patch `chrome.dll`,
   repackage.
-* `ubuntu-latest` matrix `[linux-x64, linux-arm64]` — patch the ELF and ship it
-  with `run-linux.sh`; the arm64 leg runs the whole pipeline under qemu-user
-  (binfmt), so its artifacts are built and verified, not just cross-patched.
+* `ubuntu-latest` / `ubuntu-24.04-arm` matrix `[linux-x64, linux-arm64]` — patch
+  the ELF and ship it with `run-linux.sh`; each leg renders on a runner of its own
+  architecture, so the arm64 artifact is built *and* verified, not just
+  cross-patched.
 * `release` — once the run has no failed job and at least one platform built,
   publishes one GitHub release tagged `v<engine>-crack.<n>` (the counter rolls
   on rebuilds of the same engine version). Assets: the two darwin dmg, a
   windows zip and linux tarballs per architecture. A `platform` input that
   narrows the build publishes just the platforms it built.
+
+### Runner architectures
+
+The x64 jobs run on `macos-latest`/`ubuntu-latest`/`windows-latest`; the aarch64
+engine legs run on native arm64 runners (`macos-latest` is already arm64, the
+Linux one is `ubuntu-24.04-arm`). Emulating the whole browser under `qemu-user` on
+an x86_64 host is not sufficient — the guest needs a full aarch64 sysroot, and
+without one exec fails up front with
+`qemu-aarch64: Could not open '/lib/ld-linux-aarch64.so.1'`. Cross-*patching* is
+independent of this; only the launch verification needs a native host.
 
 Runtime behaviour is CI-only for Windows (static CRT means no `exit` import, so the
 PE path relies on the indirect-call + `int3` terminating rule and was validated

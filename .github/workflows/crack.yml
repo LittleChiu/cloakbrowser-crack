@@ -251,14 +251,23 @@ jobs:
     # because the result is needed
     if: ${{ !cancelled() && inputs.platform == 'all' }}
     # The vendor publishes no Linux manager, so this ships the patched engine
-    # (plus the Dockerfile path) and verifies it headless under qemu.  Both
-    # architectures use the same signature derivation; only the ELF machine
-    # differs (EM_X86_64 vs EM_AARCH64).
-    runs-on: ubuntu-latest
+    # (plus the Dockerfile path) and verifies it headless.  Both architectures
+    # use the same signature derivation; only the ELF machine differs
+    # (EM_X86_64 vs EM_AARCH64).
+    #
+    # The arm64 leg runs on a native aarch64 runner.  binfmt+qemu-user on an
+    # x86_64 host is not enough: the engine then needs a full arm64 sysroot
+    # (qemu-aarch64 fails at `Could not open /lib/ld-linux-aarch64.so.1`), and
+    # every browser dependency would have to be cross-installed.
+    runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
-        target: [linux-x64, linux-arm64]
+        include:
+          - target: linux-x64
+            runner: ubuntu-latest
+          - target: linux-arm64
+            runner: ubuntu-24.04-arm
     env:
       ENGINE_VERSION: ${{ inputs.version }}
       CB_KEY: ${{ inputs.key || secrets.CLOAKBROWSER_KEY }}
@@ -277,22 +286,11 @@ jobs:
             fonts-liberation
           # libasound2 is libasound2t64 from 24.04 on
           sudo apt-get install -y -qq libasound2t64 || sudo apt-get install -y -qq libasound2
-          # arm64 leg: the runner is x86_64, so the engine only runs under
-          # qemu-user.  The hosted image usually already has aarch64 registered;
-          # only fix it up when it does not.  qemu-user-static is gone from
-          # 24.04 (split into per-format packages), so try the known names.
-          if [ "$TARGET" = linux-arm64 ] && ! ls /proc/sys/fs/binfmt_misc/qemu-aarch64 >/dev/null 2>&1; then
-            for pkg in qemu-user-static qemu-user-static-binfmt qemu-user qemu-user-binfmt; do
-              sudo apt-get install -y -qq "$pkg" && break
-            done
-            sudo update-binfmts --enable qemu-aarch64 || true
-          fi
-          if [ "$TARGET" = linux-arm64 ]; then
-            # say what the kernel actually has; a missing entry fails the run
-            # here with a clear message rather than as an opaque exec error
-            ls /proc/sys/fs/binfmt_misc/ 2>/dev/null || true
-            command -v qemu-aarch64-static && file "$(command -v qemu-aarch64-static)" || true
-          fi
+          # the runner must match the engine, otherwise exec fails before any
+          # render can happen; a mismatch here beats a mysterious exit 126
+          want=x86_64; [ "$TARGET" = linux-arm64 ] && want=aarch64
+          got=$(uname -m); echo "runner $got / engine $want"
+          [ "$got" = "$want" ] || { echo "runner/engine arch mismatch" >&2; exit 1; }
 
       - name: fetch engine
         run: |
