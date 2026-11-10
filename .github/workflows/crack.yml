@@ -368,12 +368,13 @@ jobs:
           # the same engine version can be rebuilt: roll crack.<n> instead of
           # colliding with a taken tag
           n=1
-          while gh release view "v$ver-crack.$n" >/dev/null 2>&1; do n=$((n+1)); done
+          while gh release view "v$ver-crack.$n" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; do n=$((n+1)); done
           echo "tag=v$ver-crack.$n" >> "$GITHUB_OUTPUT"
 
       - name: publish
         run: |
           gh release create "$tag" assets/* \
+            --repo "$GITHUB_REPOSITORY" \
             --title "CloakBrowser crack ($tag)" \
             --notes "$notes"
         env:
