@@ -38,15 +38,28 @@ engine stalls ~25 s on QUIC/ECH before the first navigation.
 ## Usage
 
 ```
-cloakcrack.py derive <container> [--out plan.json]
-cloakcrack.py patch  <container> [--sites plan.json]
-cloakcrack.py check  <container>
+cloakcrack.py derive <container> --out plan.json
+cloakcrack.py patch  <container> --sites plan.json
+cloakcrack.py verify <container> --sites plan.json
+cloakcrack.py dump   <container> --at <addr> [--count N]
 ```
 
-`derive` prints a plan; `patch` applies it (and writes the plan out for review when
-`--out` is given). `check` reports what the binary looks like without touching it.
-`--sites` replays a reviewed plan verbatim — that is what CI does, so a release can
-be re-cracked deterministically.
+`derive` writes a plan; `patch` applies it; `verify` statically confirms the plan
+is present and well-formed (every deny site now branches to a real epilogue, no
+exit-wrapper call survives in the licence window, and the fingerprint-table wait
+is cut) **without launching the engine** — it exits non-zero otherwise, so it is
+the cheap CI gate before the expensive launch test and the only check available
+for the platforms whose engine cannot run on the build host. `dump` disassembles
+around an address for review. `--sites` replays a reviewed plan verbatim — that is
+what CI does, so a release can be re-cracked deterministically.
+
+Nothing in the plan is a hard-coded offset: `derive` locates the licence window
+from string anchors, and if a future version renames every anchor it falls back
+to the fingerprint-table wait constant (a unique 31 s literal present on every
+platform and every version so far) and re-derives the critical exit sites from
+that alone. The same signature-based derivation runs unchanged on macOS arm64,
+Windows x64 and Linux x64 — only the addresses differ — so old and future builds
+crack with no code change.
 
 Containers, per platform:
 
@@ -109,6 +122,27 @@ On Windows the launcher also prefers `Engine/chrome.real.exe` over the shipped
 descriptors — Playwright's CDP handshake then never completes and every launch
 dies after a 180 s timeout. Skipping it costs nothing now that the engine is
 patched. (`verify.sh` drives `.real` for the same reason.)
+
+## GPU model on macOS / Linux
+
+The engine's seeded persona reports a blank chip (`ANGLE (Apple, ANGLE Metal
+Renderer: Apple , …)`) whenever the licence session cannot deliver the model pool
+— which a patched, offline engine never can. The manager does not send
+`--fingerprint-gpu-renderer`, so the leak survives the crack.
+
+The engine does accept that flag, and the value replaces the whole renderer
+string. So on macOS the launcher doubles as an engine shim: it points
+`CLOAKBROWSER_BINARY_PATH` at itself, recognises its own second invocation by
+the `--fingerprint-platform=` switch Playwright carries, derives a chip from
+`--fingerprint=<seed>` and re-execs the real engine with the flag appended (it
+steps aside if a caller already sent one). `run-linux.sh` does the same for the
+manager-less Linux build. Both use the exact hash that
+`backend/browser_manager.py::apple_gpu_model` uses, so a profile reports the
+same chip however it is started.
+
+The mapping is sha256(seed) → tier by the first byte, binning by the second,
+spread over the M1–M6 families. It is stable per profile, differs between
+profiles, and needs no server round-trip.
 
 ## Verification
 

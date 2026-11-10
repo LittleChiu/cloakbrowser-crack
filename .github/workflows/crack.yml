@@ -85,6 +85,8 @@ jobs:
           file "$FW"
           python3 cloakcrack.py derive "$FW" --out plan.json
           python3 cloakcrack.py patch  "$FW" --sites plan.json
+          # static gate: confirm every deny site is defused before packaging
+          python3 cloakcrack.py verify "$FW" --sites plan.json
 
       - name: package
         run: package/package.sh macos engine/Chromium.app out
@@ -176,6 +178,7 @@ jobs:
           file "$DLL"
           python3 cloakcrack.py derive "$DLL" --out plan.json
           python3 cloakcrack.py patch  "$DLL" --sites plan.json
+          python3 cloakcrack.py verify "$DLL" --sites plan.json
 
       - name: package
         run: |
@@ -286,6 +289,7 @@ jobs:
           set -euo pipefail
           python3 cloakcrack.py derive engine/chrome --out plan.json
           python3 cloakcrack.py patch  engine/chrome --sites plan.json
+          python3 cloakcrack.py verify engine/chrome --sites plan.json
 
       - name: package
         run: package/package.sh linux engine out

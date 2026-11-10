@@ -630,6 +630,14 @@ RESTORE_LDP = {0xA9407BFD, 0xA9417BFD, 0xA9427BFD, 0xA9437BFD, 0xA9447BFD, 0xA94
 
 
 def jmp_target(b: Bin, va: int) -> int | None:
+    if b.arch == ARM64:
+        w = b.word(va)
+        if w is not None and (w & 0xFC000000) == 0x14000000:  # b (unconditional)
+            imm = w & 0x03FFFFFF
+            if imm & 0x02000000:
+                imm -= 0x04000000
+            return va + imm * 4
+        return bl_target(b, va)
     raw = b.read(va, 5)
     if len(raw) == 5 and raw[0] == 0xE9:
         return va + 5 + struct.unpack("<i", raw[1:])[0]
@@ -768,9 +776,23 @@ def ends_with_ret(b: Bin, va: int) -> bool:
 
 
 def wait_sites(b: Bin) -> list[int]:
-    raw = bytes(b.code_blob())
     seg = b.code()
     out: list[int] = []
+    if b.arch == ARM64:
+        # arm64 has no inline 32-bit literal: the 31 s TimeDelta is built with
+        # movz (low half) + movk (high half). Scan for that pair on any reg.
+        raw = bytes(b.code_blob())
+        lo16, hi16 = WAIT_US & 0xFFFF, WAIT_US >> 16
+        for off in range(0, len(raw) - 7, 4):
+            w = struct.unpack_from("<I", raw, off)[0]
+            if (w & 0xFF800000) != 0x52800000 or ((w >> 5) & 0xFFFF) != lo16:
+                continue
+            reg = w & 0x1F
+            nxt = struct.unpack_from("<I", raw, off + 4)[0]
+            if (nxt & 0xFFE00000) == 0x72A00000 and (nxt & 0x1F) == reg and ((nxt >> 5) & 0xFFFF) == hi16:
+                out.append(seg.addr + off)
+        return out
+    raw = bytes(b.code_blob())
     pat = struct.pack("<I", WAIT_US)
     i = raw.find(pat)
     while i >= 0:
@@ -780,23 +802,30 @@ def wait_sites(b: Bin) -> list[int]:
 
 
 def derive(b: Bin) -> dict:
+    # Primary anchors: the license-runtime strings. These are the only
+    # version-specific inputs, so when they drift we fall back to the
+    # fingerprint-table wait constant (31 s TimeDelta), which is a unique
+    # numeric literal that sits in the middle of the license code on every
+    # platform and has survived every version so far.
     av = anchor_vaddrs(b)
-    if not av:
-        raise Fatal("no license anchors — wrong binary?")
-    xr = xrefs(b, set(av))
+    xr = xrefs(b, set(av)) if av else []
     if xr:
         span_lo = min(xr) - 0x400
         span_hi = max(xr) + 0x400
-    elif b.kind in ("pe", "elf"):
-        # the compiler emits no rip-relative leas to these strings; the
-        # fingerprint-table wait constant is unique and sits mid-license-code
+    else:
+        # the compiler emits no rip-relative leas to these strings on win/elf,
+        # and a future macOS rename would drop the anchors entirely: either way
+        # the wait constant alone pins the license window.
         sites = wait_sites(b)
         if not sites:
-            raise Fatal("no license anchors refs and no wait constant")
+            raise Fatal(
+                "no license-anchor xrefs and no fingerprint-table wait "
+                "constant — wrong binary or the runtime changed shape"
+            )
         span_lo = min(sites) - 0x30000
         span_hi = max(sites) + 0x30000
-    else:
-        raise Fatal("no code references the license anchors")
+        if not av:
+            print("# anchors drifted; deriving from the wait constant alone")
 
     # every call out of the license code window
     calls: dict[int, list[int]] = {}
@@ -906,23 +935,32 @@ WAIT_NEW_US = 2_500_000
 def wait_consts(b: Bin, lo: int, hi: int) -> list[dict]:
     """Find the inline TimeDelta handed to BlockUntilFingerprintTableKeyResolved."""
     out = []
-    if True:
+    if b.arch == ARM64:
         for va, width, e in insns(b, lo, max(1, (hi - lo) // 4)):
-            if b.arch == ARM64:
-                w = struct.unpack("<I", bytes.fromhex(e))[0]
-                reg = w & 0x1F
-                if (w & 0xFF800000) != 0x52800000 or ((w >> 5) & 0xFFFF) != (WAIT_US & 0xFFFF):
-                    continue
-                nxt = b.word(va + 4) or 0
-                if (nxt & 0xFFE00000) == 0x72A00000 and (nxt & 0x1F) == reg and ((nxt >> 5) & 0xFFFF) == (WAIT_US >> 16):
-                    out.append({"at": va, "kind": "arm64-movz-movk", "reg": reg})
-            else:
-                raw = bytes.fromhex(e.split("|")[0])
-                if len(raw) == 5 and raw[0] == 0xBA and struct.unpack("<I", raw[1:5])[0] == WAIT_US:
-                    out.append({"at": va, "kind": "x64-mov-imm32", "imm_at": va + 1})
-                elif (len(raw) == 6 and raw[0] == 0x41 and raw[1] == 0xB8
-                      and struct.unpack("<I", raw[2:6])[0] == WAIT_US):
-                    out.append({"at": va, "kind": "x64-mov-imm32", "imm_at": va + 2})
+            w = struct.unpack("<I", bytes.fromhex(e))[0]
+            reg = w & 0x1F
+            if (w & 0xFF800000) != 0x52800000 or ((w >> 5) & 0xFFFF) != (WAIT_US & 0xFFFF):
+                continue
+            nxt = b.word(va + 4) or 0
+            if (nxt & 0xFFE00000) == 0x72A00000 and (nxt & 0x1F) == reg and ((nxt >> 5) & 0xFFFF) == (WAIT_US >> 16):
+                out.append({"at": va, "kind": "arm64-movz-movk", "reg": reg})
+        return out
+    # x86: the decoded sweep desyncs on data in the text section and can drop the
+    # literal, so byte-scan for the 4-byte immediate and classify the opcode that
+    # precedes it (`mov edx, imm32` = BA; `mov r8d, imm32` = 41 B8).
+    seg = b.code()
+    raw = bytes(b.code_blob())
+    pat = struct.pack("<I", WAIT_US)
+    base = seg.addr
+    i = raw.find(pat)
+    while i >= 0:
+        imm_at = base + i
+        if lo <= imm_at < hi:
+            if i >= 1 and raw[i - 1] == 0xBA:
+                out.append({"at": imm_at - 1, "kind": "x64-mov-imm32", "imm_at": imm_at})
+            elif i >= 2 and raw[i - 2] == 0x41 and raw[i - 1] == 0xB8:
+                out.append({"at": imm_at - 2, "kind": "x64-mov-imm32", "imm_at": imm_at})
+        i = raw.find(pat, i + 1)
     return out
 
 
@@ -949,6 +987,97 @@ def patch(b: Bin, manifest: dict) -> None:
 
 
 # --------------------------------------------------------------------------- #
+# Static verification: confirm a patch is sound without launching a browser
+# --------------------------------------------------------------------------- #
+def verify_patched(b: Bin, manifest: dict) -> list[str]:
+    """Structurally check that `b` carries `manifest`'s patch. Returns a list of
+    problems; an empty list means the patch is present and well-formed.
+
+    This never runs code, so it is the cheap gate CI uses before the expensive
+    launch test, and the only check available for the two platforms whose engine
+    cannot run on the build host.
+    """
+    problems: list[str] = []
+    span = manifest.get("license_span")
+    lo, hi = (int(span[0], 16), int(span[1], 16)) if span else (0, 0)
+    wrappers = {int(w, 16) for w in manifest.get("wrappers", [])}
+
+    for p in manifest["patches"]:
+        va, to = p["call"], p["to"]
+        # 1. the deny site must now be an unconditional jump to the epilogue.
+        dest = jmp_target(b, va)
+        if dest is None:
+            problems.append(f"{va:#x}: not an unconditional jump after patching")
+        elif dest != to:
+            problems.append(f"{va:#x}: jumps to {dest:#x}, manifest says {to:#x}")
+        # 2. the epilogue it lands on must really end in a return.
+        if not _reaches_ret(b, to):
+            problems.append(f"{va:#x}: target {to:#x} does not reach a ret")
+
+    # 3. no call to an exit-wrapper may survive inside the license window: any
+    #    that does is an unpatched deny path that will still kill a launch.
+    if lo and hi:
+        for w in wrappers:
+            survivors = [s for s in call_sites_of_any(b, w, lo, hi)
+                         if jmp_target(b, s) != manifest_to(manifest, s)]
+            for s in survivors:
+                if bl_target(b, s) == w:  # still a live call, not our jump
+                    problems.append(f"{s:#x}: live call to wrapper {w:#x} survived")
+
+    # 4. the fingerprint-table wait, if the manifest recorded one, must be cut.
+    for wcon in manifest.get("wait_consts", []):
+        at = wcon["at"]
+        if wcon["kind"] == "arm64-movz-movk":
+            w = b.word(at) or 0
+            if ((w >> 5) & 0xFFFF) != (WAIT_NEW_US & 0xFFFF):
+                problems.append(f"{at:#x}: wait constant not reduced")
+        else:
+            cur = struct.unpack("<I", b.read(wcon["imm_at"], 4))[0]
+            if cur != WAIT_NEW_US:
+                problems.append(f"{at:#x}: wait constant still {cur}")
+    return problems
+
+
+def manifest_to(manifest: dict, site: int) -> int | None:
+    for p in manifest["patches"]:
+        if p["call"] == site:
+            return p["to"]
+    return None
+
+
+def call_sites_of_any(b: Bin, target: int, lo: int, hi: int) -> list[int]:
+    """Every bl/call landing on `target` in [lo, hi), format-agnostic."""
+    out: list[int] = []
+    if b.arch == ARM64:
+        va = lo
+        while va < hi:
+            if bl_target(b, va) == target:
+                out.append(va)
+            va += 4
+        return out
+    return call_sites_of(b, target, lo, hi)
+
+
+def _reaches_ret(b: Bin, va: int, cap: int = 0x80) -> bool:
+    """True if a forward run from `va` hits a ret before padding/branching out."""
+    if b.arch == ARM64:
+        cur = va
+        for _ in range(cap):
+            if is_ret(b, cur):
+                return True
+            if is_pad(b, cur):
+                return False
+            cur += 4
+        return False
+    for cur, _w, _e in insns(b, va, cap * 0x10):
+        if is_ret(b, cur):
+            return True
+        if b.read(cur, 1) in (b"\xcc",):
+            return False
+    return False
+
+
+# --------------------------------------------------------------------------- #
 # CLI
 # --------------------------------------------------------------------------- #
 def main() -> int:
@@ -960,6 +1089,9 @@ def main() -> int:
     p = sub.add_parser("patch")
     p.add_argument("container")
     p.add_argument("--sites", required=True)
+    v = sub.add_parser("verify")
+    v.add_argument("container")
+    v.add_argument("--sites", required=True)
     a = sub.add_parser("dump")
     a.add_argument("container")
     a.add_argument("--at", type=lambda s: int(s, 0))
@@ -983,6 +1115,20 @@ def main() -> int:
         patch(b, man)
         b.save()
         print(f"patched {args.container}")
+        return 0
+    if args.cmd == "verify":
+        man = json.loads(Path(args.sites).read_text())
+        problems = verify_patched(b, man)
+        if problems:
+            print(f"{args.container}: NOT patched soundly ({len(problems)} issue(s)):")
+            for pr in problems:
+                print(f"  - {pr}")
+            return 1
+        print(
+            f"{args.container}: patch verified — "
+            f"{len(man['patches'])} deny site(s) defused, "
+            f"{len(man['wait_consts'])} wait const(s) cut"
+        )
         return 0
     for va, w, e in insns(b, args.at, args.count):
         extra = ""

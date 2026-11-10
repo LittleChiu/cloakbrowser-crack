@@ -86,6 +86,153 @@ static int dir_of(const char *argv0, char *out, size_t cap) {
 
 static void write_file(const char *path, const char *text);
 
+/* ------------------------------------------------------------------- sha256
+ * Only used to turn a seed into a stable chip choice, so the seed string is all
+ * we ever hash.  Self-contained to keep the stub dependency-free. */
+static const unsigned int SHA256_K[64] = {
+    0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1,
+    0x923f82a4, 0xab1c5ed5, 0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3,
+    0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174, 0xe49b69c1, 0xefbe4786,
+    0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+    0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147,
+    0x06ca6351, 0x14292967, 0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13,
+    0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85, 0xa2bfe8a1, 0xa81a664b,
+    0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+    0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a,
+    0x5b9cca4f, 0x682e6ff3, 0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208,
+    0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
+};
+#define ROR32(x, n) (((x) >> (n)) | ((x) << (32 - (n))))
+static void sha256_block(unsigned int *h, const unsigned char *p) {
+  unsigned int w[64], a, b, c, d, e, f, g, k, t1, t2;
+  int i;
+  for (i = 0; i < 16; i++)
+    w[i] = (unsigned int)p[i * 4] << 24 | (unsigned int)p[i * 4 + 1] << 16 |
+           (unsigned int)p[i * 4 + 2] << 8 | p[i * 4 + 3];
+  for (; i < 64; i++)
+    w[i] = w[i - 16] + (ROR32(w[i - 15], 7) ^ ROR32(w[i - 15], 18) ^ (w[i - 15] >> 3)) +
+           w[i - 7] + (ROR32(w[i - 2], 17) ^ ROR32(w[i - 2], 19) ^ (w[i - 2] >> 10));
+  a = h[0]; b = h[1]; c = h[2]; d = h[3]; e = h[4]; f = h[5]; g = h[6]; k = h[7];
+  for (i = 0; i < 64; i++) {
+    t1 = k + (ROR32(e, 6) ^ ROR32(e, 11) ^ ROR32(e, 25)) + ((e & f) ^ (~e & g)) +
+         SHA256_K[i] + w[i];
+    t2 = (ROR32(a, 2) ^ ROR32(a, 13) ^ ROR32(a, 22)) + ((a & b) ^ (a & c) ^ (b & c));
+    k = g; g = f; f = e; e = d + t1; d = c; c = b; b = a; a = t1 + t2;
+  }
+  h[0] += a; h[1] += b; h[2] += c; h[3] += d;
+  h[4] += e; h[5] += f; h[6] += g; h[7] += k;
+}
+static void sha256_string(const char *s, unsigned char out[32]) {
+  unsigned int h[8] = {0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
+                       0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19};
+  unsigned char buf[64];
+  size_t len = strlen(s), off = 0, rem, i;
+  unsigned long long bits;
+  int j;
+  while (len - off >= 64) {
+    sha256_block(h, (const unsigned char *)s + off);
+    off += 64;
+  }
+  rem = len - off;
+  memcpy(buf, s + off, rem);
+  buf[rem] = 0x80;
+  if (rem < 56) {
+    memset(buf + rem + 1, 0, 56 - rem - 1);
+  } else {
+    memset(buf + rem + 1, 0, 64 - rem - 1);
+    sha256_block(h, buf);
+    memset(buf, 0, 56);
+  }
+  bits = (unsigned long long)len * 8ULL;
+  for (j = 0; j < 8; j++) buf[56 + j] = (unsigned char)(bits >> (56 - 8 * j));
+  sha256_block(h, buf);
+  for (i = 0; i < 8; i++) {
+    out[i * 4] = (unsigned char)(h[i] >> 24);
+    out[i * 4 + 1] = (unsigned char)(h[i] >> 16);
+    out[i * 4 + 2] = (unsigned char)(h[i] >> 8);
+    out[i * 4 + 3] = (unsigned char)h[i];
+  }
+}
+
+
+/* ---------------------------------------------------------------- engine mode
+ *
+ * The manager's own fingerprint code leaves the macOS GPU model blank: it
+ * expects the licence session to deliver the model pool, which a patched
+ * engine never sees, so WebGL reports "Apple " with no chip.  The manager is a
+ * frozen executable we cannot recompile, but it resolves the engine path from
+ * CLOAKBROWSER_BINARY_PATH — so the launcher doubles as a shim: it points that
+ * variable at *itself*, sees its own name come back with Chromium arguments,
+ * appends the chip flag and re-execs the real engine.
+ *
+ * The chip is derived from --fingerprint=<seed> exactly like the manager's
+ * apple_gpu_model() (sha256, first byte picks the tier, second the binning), so
+ * a profile keeps one stable identity whether or not the manager also passes
+ * the flag itself (build_launch_args dedupes by key, last one wins).
+ */
+static const char *const APPLE_GPU_TIERS[][4] = {
+    {"M1", "M1 Pro", "M1 Max", "M1 Ultra"},
+    {"M2", "M2 Pro", "M2 Max", "M2 Ultra"},
+    {"M3", "M3 Pro", "M3 Max", NULL},
+    {"M4", "M4 Pro", "M4 Max", NULL},
+    {"M5", "M5 Pro", "M5 Max", NULL},
+    {"M6", "M6 Pro", "M6 Max", NULL},
+};
+#define APPLE_GPU_TIER_COUNT (sizeof APPLE_GPU_TIERS / sizeof APPLE_GPU_TIERS[0])
+
+static int is_engine_invocation(int argc, char **argv) {
+  int i;
+  /* This file is both the manager stub and, via CLOAKBROWSER_BINARY_PATH, the
+   * engine Playwright spawns.  Our own start has no arguments; an engine start
+   * always carries the manager's fingerprint flags, and --fingerprint-platform
+   * is the one the manager always adds.  --user-data-dir is a fallback for
+   * callers that strip our flags. */
+  for (i = 1; i < argc; i++) {
+    if (!argv[i]) continue;
+    if (strstr(argv[i], "--fingerprint-platform=")) return 1;
+    if (strstr(argv[i], "--user-data-dir")) return 1;
+  }
+  return 0;
+}
+
+/* Convert a seed string to the model name.  This mirrors the Python
+ * implementation byte for byte (sha256 + the same tier/bin indices), so the
+ * build never depends on which side is authoritative. */
+static int apple_gpu_model(const char *seed, char *out, size_t cap) {
+  unsigned char digest[32];
+  unsigned long long tier_i, chip_i;
+  const char *const *tier;
+  size_t avail = 0;
+  if (!seed || !*seed) return 0;
+  sha256_string(seed, digest);
+  tier_i = digest[0] % APPLE_GPU_TIER_COUNT;
+  tier = APPLE_GPU_TIERS[tier_i];
+  while (avail < 4 && tier[avail]) avail++;
+  chip_i = (unsigned long long)digest[1] % avail;
+  if (strlen(tier[chip_i]) + 1 > cap) return 0;
+  strcpy(out, tier[chip_i]);
+  return 1;
+}
+
+/* Return the value of --fingerprint= from the argument list (not the
+ * --fingerprint-* sub-flags). */
+static const char *seed_arg(int argc, char **argv) {
+  int i;
+  for (i = 1; i < argc; i++) {
+    if (argv[i] && !strncmp(argv[i], "--fingerprint=", 14)) return argv[i] + 14;
+  }
+  return NULL;
+}
+
+static int has_gpu_renderer(int argc, char **argv) {
+  int i;
+  for (i = 1; i < argc; i++) {
+    if (argv[i] && !strncmp(argv[i], "--fingerprint-gpu-renderer", 26)) return 1;
+  }
+  return 0;
+}
+
+
 /* The wrapper hands the engine a denial-report file only when it can create
  * ~/.cloakbrowser/denials.  Make that path an ordinary file so creation always
  * fails: no denial file is ever minted, so the manager judges a launch by CDP
@@ -217,12 +364,45 @@ int main(int argc, char **argv) {
   char dir[4096];
   char engine[4600];
   char real[4300];
+  char self[4300];
+  char model[64];
+  const char *seed;
 
   if (!dir_of(argc ? argv[0] : NULL, dir, sizeof dir)) {
     fputs("launcher: cannot resolve own directory\n", stderr);
     return 1;
   }
+#ifdef _WIN32
+  GetModuleFileNameA(NULL, self, sizeof self);
+#else
+  if (!realpath(argv[0], self)) {
+    if (readlink("/proc/self/exe", self, sizeof self - 1) <= 0) {
+      fputs("launcher: cannot resolve own path\n", stderr);
+      return 1;
+    }
+  }
+#endif
+
+  /* The manager resolves the engine from CLOAKBROWSER_BINARY_PATH, so it is
+   * pointed at this very file: Playwright then runs us a second time with the
+   * Chromium command line, and engine mode hands over to the real engine. */
+  if (is_engine_invocation(argc, argv) && (seed = seed_arg(argc, argv)) != NULL &&
+      !has_gpu_renderer(argc, argv) && apple_gpu_model(seed, model, sizeof model)) {
+    static char flag[160];
+    static char **nargv;
+    snprintf(flag, sizeof flag, "--fingerprint-gpu-renderer=%s", model);
+    nargv = malloc((size_t)(argc + 2) * sizeof *nargv);
+    if (nargv) {
+      memcpy(nargv, argv, (size_t)(argc + 1) * sizeof *argv);
+      nargv[argc] = flag;
+      nargv[argc + 1] = NULL;
+      argv = nargv;
+      argc++;
+    }
+  }
   seed_license();
+
+  int engine_mode = is_engine_invocation(argc, argv);
 
 #ifdef _WIN32
   SetEnvironmentVariableA("CLOAKBROWSER_LICENSE_API", DEAD_LICENSE_API);
@@ -239,27 +419,32 @@ int main(int argc, char **argv) {
   snprintf(real, sizeof real, "%s" SEP "CloakBrowser Manager.bin" EXE, dir);
   if (GetFileAttributesA(real) == INVALID_FILE_ATTRIBUTES)
     snprintf(real, sizeof real, "%s" SEP "CloakBrowser Manager" EXE ".bin", dir);
-  SetEnvironmentVariableA("CLOAKBROWSER_BINARY_PATH", engine);
+  if (engine_mode)
+    SetEnvironmentVariableA("CLOAKBROWSER_BINARY_PATH", engine);
+  else
+    SetEnvironmentVariableA("CLOAKBROWSER_BINARY_PATH", self);
 #else
   snprintf(engine, sizeof engine, "%s" SEP ".." SEP "Resources" SEP "engine" SEP
                                 "Chromium.app" SEP "Contents" SEP "MacOS" SEP "Chromium", dir);
   snprintf(real, sizeof real, "%s" SEP "CloakBrowser Manager.bin", dir);
   setenv("CLOAKBROWSER_LICENSE_API", DEAD_LICENSE_API, 1);
-  setenv("CLOAKBROWSER_BINARY_PATH", engine, 1);
+  setenv("CLOAKBROWSER_BINARY_PATH", engine_mode ? engine : self, 1);
 #endif
 
-  argv[0] = real;
+  /* In engine mode the real engine takes over under our name; Playwright keys
+   * nothing off argv[0], and this keeps process listings recognisable. */
+  if (!engine_mode) argv[0] = real;
 #ifdef _WIN32
   {
-    intptr_t rc = _spawnv(_P_WAIT, real, (const char *const *)argv);
+    intptr_t rc = _spawnv(_P_WAIT, engine_mode ? engine : real, (const char *const *)argv);
     if (rc == -1) {
-      fprintf(stderr, "launcher: cannot start %s\n", real);
+      fprintf(stderr, "launcher: cannot start %s\n", engine_mode ? engine : real);
       return 1;
     }
     return (int)rc;
   }
 #else
-  execv(real, argv);
+  execv(engine_mode ? engine : real, argv);
   perror("launcher: execv");
   return 1;
 #endif
