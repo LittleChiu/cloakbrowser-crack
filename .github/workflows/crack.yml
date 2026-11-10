@@ -326,7 +326,9 @@ jobs:
     # engine version appends to (or rolls) the same release instead of
     # failing on a taken tag.
     needs: [macos, windows, linux]
-    if: ${{ !cancelled() && (needs.macos.result == 'success' || needs.macos.result == 'skipped') && needs.windows.result == 'success' && (needs.linux.result == 'success' || inputs.platform == 'windows-only') }}
+    # platform=macos or windows-only leaves some needs skipped, so require
+    # "nothing failed" plus at least one built platform rather than all three.
+    if: ${{ !cancelled() && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') && (needs.macos.result == 'success' || needs.windows.result == 'success') }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
