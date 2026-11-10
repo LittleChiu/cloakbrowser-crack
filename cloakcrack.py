@@ -170,11 +170,15 @@ def _elf(path: Path, data: bytearray) -> Bin:
     shnum = struct.unpack_from("<H", data, 0x3C)[0]
     shstrndx = struct.unpack_from("<H", data, 0x3E)[0]
     machine = struct.unpack_from("<H", data, 0x12)[0]
-    if machine != 0x3E:
+    if machine == 0x3E:
+        arch = X64
+    elif machine == 0xB7:  # EM_AARCH64
+        arch = ARM64
+    else:
         raise Fatal(f"unsupported ELF machine {machine}")
     hdrs = [struct.unpack_from("<IIQQQQ", data, shoff + i * shentsize) for i in range(shnum)]
     strtab = hdrs[shstrndx]
-    b = Bin(path, data, "elf", X64)
+    b = Bin(path, data, "elf", arch)
     for nameoff, _typ, _flags, addr, off, size in hdrs:
         p = off and strtab[4] + nameoff
         try:
@@ -487,6 +491,19 @@ def _elf_stubs(b: Bin) -> set[int]:
             continue
         # several stubs can jump through the same GOT slot (twin PLT groups);
         # keep them all so the real call target is always in the set
+        if b.arch == ARM64:
+            # the absent x86 `jmp [rip+n]` form is replaced by the arm64 island
+            # `adrp x, page; ldr x, [x, #off]; add x, x, #off; br x`: the GOT
+            # slot is the adrp page plus the add immediate.
+            for o in range(plt.off, plt.off + plt.size - 16, 16):
+                a, b2, c = struct.unpack_from("<III", data, o)
+                if (a & 0x9F000000) != 0x90000000 or (c & 0x7F800000) != 0x11000000:
+                    continue
+                va = plt.addr + (o - plt.off)
+                page = (va & ~0xFFF) + ((((a >> 5) & 0x7FFFF) << 2) | ((a >> 29) & 3)) * 0x1000
+                if page + (c >> 10 & 0xFFF) == off:
+                    out.add(va)
+            continue
         for o in range(plt.off, plt.off + plt.size - 6, 16):
             if data[o] == 0xFF and data[o + 1] == 0x25:
                 disp = struct.unpack_from("<i", data, o + 2)[0]
@@ -766,7 +783,15 @@ def epilogue_after(b: Bin, site: int, cap: int = 0x3000) -> int | None:
 def head_insns(b: Bin, start: int, count: int) -> list[tuple[int, bytes]]:
     step = 4 if b.arch == ARM64 else 0x40
     if b.arch == ARM64:
-        return [(start + i * 4, b.read(start + i * 4, 4)) for i in range(count)]
+        # A stub can sit on the last slots of its segment (.iplt is 64 bytes on
+        # arm64 ELF), so stop where the mapping does instead of over-reading.
+        out: list[tuple[int, bytes]] = []
+        for i in range(count):
+            va = start + i * 4
+            if b.seg_of(va) is None:
+                break
+            out.append((va, b.read(va, 4)))
+        return out
     rows = insns(b, start, step * count)
     return [(va, bytes.fromhex(e.split("|")[0])) for va, _w, e in rows[:count]]
 

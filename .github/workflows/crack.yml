@@ -245,12 +245,19 @@ jobs:
     needs: macos
     if: inputs.platform == 'all'
     # The vendor publishes no Linux manager, so this ships the patched engine
-    # (plus the Dockerfile path) and verifies it headless.
+    # (plus the Dockerfile path) and verifies it headless under qemu.  Both
+    # architectures use the same signature derivation; only the ELF machine
+    # differs (EM_X86_64 vs EM_AARCH64).
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [linux-x64, linux-arm64]
     env:
       ENGINE_VERSION: ${{ inputs.version }}
       CB_KEY: ${{ inputs.key || secrets.CLOAKBROWSER_KEY }}
       GH_API: ${{ github.token }}
+      TARGET: ${{ matrix.target }}
     steps:
       - uses: actions/checkout@v4
       - run: pip install --quiet --break-system-packages capstone
@@ -264,6 +271,13 @@ jobs:
             fonts-liberation
           # libasound2 is libasound2t64 from 24.04 on
           sudo apt-get install -y -qq libasound2t64 || sudo apt-get install -y -qq libasound2
+          # arm64 leg: the runner is x86_64, so the engine only runs under
+          # qemu-user.  binfmt registration is skipped on runners that already
+          # have aarch64 enabled.
+          if [ "$TARGET" = linux-arm64 ] && ! ls /proc/sys/fs/binfmt_misc/qemu-aarch64 >/dev/null 2>&1; then
+            sudo apt-get install -y -qq qemu-user-static
+            sudo update-binfmts --enable qemu-aarch64 || true
+          fi
 
       - name: fetch engine
         run: |
@@ -280,9 +294,10 @@ jobs:
             return 1
           }
           ver=${ENGINE_VERSION:-$(curl -fsS https://cloakbrowser.dev/api/download/version | sed 's/.*"version":"\([^"]*\)".*/\1/')}
-          dl "https://cloakbrowser.dev/api/download/$ver" linux-x64 engine.tar.gz
+          dl "https://cloakbrowser.dev/api/download/$ver" "$TARGET" engine.tar.gz
           mkdir engine && tar xzf engine.tar.gz -C engine
           chmod +x engine/chrome
+          file engine/chrome
 
       - name: derive patch plan
         run: |
@@ -299,5 +314,5 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: CloakBrowser-Manager-linux-x64
+          name: CloakBrowser-Manager-${{ matrix.target }}
           path: out

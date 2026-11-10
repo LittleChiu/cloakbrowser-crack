@@ -58,8 +58,8 @@ from string anchors, and if a future version renames every anchor it falls back
 to the fingerprint-table wait constant (a unique 31 s literal present on every
 platform and every version so far) and re-derives the critical exit sites from
 that alone. The same signature-based derivation runs unchanged on macOS arm64,
-Windows x64 and Linux x64 — only the addresses differ — so old and future builds
-crack with no code change.
+Windows x64, Linux x64 and Linux arm64 — only the addresses differ — so old and
+future builds crack with no code change.
 
 Containers, per platform:
 
@@ -67,7 +67,7 @@ Containers, per platform:
 | --- | --- |
 | macOS | `…/Chromium Framework.framework/Versions/Current/Chromium Framework` |
 | Windows | `chrome.dll` |
-| Linux | the `chrome` ELF |
+| Linux | the `chrome` ELF (x86-64 or aarch64) |
 
 ## Packaging
 
@@ -165,8 +165,12 @@ renderer can hang in teardown and drop its output.
   verify; the x64 leg runs the verification under Rosetta.
 * `windows-latest` — silent Inno install of the vendor manager, patch `chrome.dll`,
   repackage.
-* `ubuntu-latest` — patch the ELF and ship it with `run-linux.sh`.
+* `ubuntu-latest` matrix `[linux-x64, linux-arm64]` — patch the ELF and ship it
+  with `run-linux.sh`; the arm64 leg runs the whole pipeline under qemu-user
+  (binfmt), so its artifacts are built and verified, not just cross-patched.
 
 Runtime behaviour is CI-only for Windows (static CRT means no `exit` import, so the
 PE path relies on the indirect-call + `int3` terminating rule and was validated
-statically) and for Linux (a local qemu run traps in the engine's own startup).
+statically). The Linux arm64 path was validated end to end locally on a native
+aarch64 container: pristine exits `77`, patched renders (exit `0`), `verify.sh`
+passes.
