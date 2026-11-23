@@ -82,7 +82,7 @@ render_once() { # seed dir -> canvas hash; 0 = produced output
   # old pipeline made a launch failure indistinguishable from a missing match.
   local out="$dir/stdout"
   HOME="$dir" TMPDIR="$dir" CLOAKBROWSER_LICENSE_API=http://127.0.0.1:1 ${RUN[@]+"${RUN[@]}"} "$BIN" \
-    --user-data-dir="$dir/u" --headless=new --dump-dom --no-sandbox \
+    --user-data-dir="$dir/u" --headless --dump-dom --no-sandbox \
     --no-first-run --virtual-time-budget=2000 \
     --fingerprint="$seed" "$PAGE" >"$out" 2>"$dir/stderr" &
   local pid=$!
@@ -137,17 +137,17 @@ MINGW* | MSYS* | CYGWIN*)
   echo "probe-bash exit=$? out=[$(head -c 120 "$TMP/p1.out")] err=[$(head -c 200 "$TMP/p1.err")]" >&2
   cmd //c "\"$(cygpath -w "$BIN")\" --version" >"$TMP/p2.out" 2>&1
   echo "probe-cmd exit=$? out=[$(head -c 160 "$TMP/p2.out")]" >&2
-  "$BIN" --user-data-dir="$TMP/ru" --headless=new --dump-dom --no-sandbox \
+  "$BIN" --user-data-dir="$TMP/ru" --headless --dump-dom --no-sandbox \
     --no-first-run --virtual-time-budget=2000 --fingerprint=111222 "$PAGE" \
     >"$TMP/p3.out" 2>"$TMP/p3.err"
   echo "probe-render exit=$? out=[$(grep -o '{"canvas"[^}]*}' "$TMP/p3.out" | head -1)] err=[$(head -c 200 "$TMP/p3.err")]" >&2
   echo "probe-with-env: $(HOME="$TMP/rh" TMPDIR="$TMP/rh" "$BIN" --version >/dev/null 2>&1; echo $?)" >&2
   try() { local lbl=$1; shift; timeout 60 "$BIN" "$@" >"$TMP/x.out" 2>"$TMP/x.err"; echo "probe[$lbl] exit=$? out=$(wc -c <"$TMP/x.out") err=[$(head -c 130 "$TMP/x.err" | tr '\n' ' ')]" >&2; }
   try v --version
-  try hl --headless=new --version
+  try hl --headless --version
   try dom --dump-dom "$PAGE"
-  try hldom --headless=new --dump-dom "$PAGE"
-  try udd --no-sandbox --user-data-dir="$TMP/ru3" --headless=new --dump-dom "$PAGE"
+  try hldom --headless --dump-dom "$PAGE"
+  try udd --no-sandbox --user-data-dir="$TMP/ru3" --headless --dump-dom "$PAGE"
   ;;
 esac
 
