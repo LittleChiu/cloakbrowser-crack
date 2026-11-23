@@ -33,11 +33,23 @@ Darwin)
   fi
   ;;
 MINGW* | MSYS* | CYGWIN*)
-  # The shipped chrome.exe is a licence-injecting wrapper around chrome.real.exe
-  # that also loses the --remote-debugging-pipe descriptors Playwright needs;
-  # drive the real binary so what verify proves is what a launch runs.
-  BIN="$ROOT/Engine/chrome.real.exe"
-  [ -x "$BIN" ] || BIN="$ROOT/Engine/chrome.exe"
+  # Older engines ship chrome.exe as a licence-injecting wrapper around
+  # chrome.real.exe (and the wrapper loses the --remote-debugging-pipe
+  # descriptors Playwright needs). 156 dropped the wrapper: chrome.exe is the
+  # real binary and .real is gone. Drive a real binary when one exists, else
+  # fall back to the largest non-helper exe so a layout change cannot silently
+  # pick a stub.
+  ENGDIR="$ROOT/Engine"
+  echo "verify: engine dir $ENGDIR" >&2
+  ls -la "$ENGDIR" >&2 2>&1 || true
+  BIN="$ENGDIR/chrome.real.exe"
+  [ -s "$BIN" ] || BIN="$ENGDIR/chrome.exe"
+  if [ ! -s "$BIN" ]; then
+    BIN=$(ls -S "$ENGDIR"/*.exe 2>/dev/null |
+      grep -v -E 'chrome_proxy|elevation_service|notification_helper|chrome_pwa|setup|crashpad|chromedriver' |
+      head -1)
+  fi
+  echo "verify: engine binary $BIN ($(file -b "$BIN" 2>/dev/null))" >&2
   # The browser needs a drive-letter URL, not a Git Bash /tmp path.
   PAGE=$(cygpath -w "$TMP/fp.html")
   PAGE="file:///${PAGE//\\//}"
@@ -45,7 +57,7 @@ MINGW* | MSYS* | CYGWIN*)
   ;;
 *) BIN="$ROOT/chrome" ;;
 esac
-[ -x "$BIN" ] || {
+[ -s "$BIN" ] || {
   echo "verify: no engine at $BIN" >&2
   exit 1
 }
