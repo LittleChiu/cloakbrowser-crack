@@ -150,6 +150,10 @@ MINGW* | MSYS* | CYGWIN*)
   try udd --no-sandbox --user-data-dir="$TMP/ru3" --headless --dump-dom "$PAGE"
   try log --no-sandbox --user-data-dir="$TMP/ru4" --enable-logging=stderr --v=1 --headless --dump-dom "$PAGE"
   try old --no-sandbox --user-data-dir="$TMP/ru5" --headless=old --dump-dom "$PAGE"
+  try nogpu --no-sandbox --disable-gpu --user-data-dir="$TMP/ru6" --headless --dump-dom "$PAGE"
+  try single --no-sandbox --single-process --user-data-dir="$TMP/ru7" --headless --dump-dom "$PAGE"
+  try cdp --no-sandbox --user-data-dir="$TMP/ru8" --headless --remote-debugging-port=9333 "$PAGE"
+  timeout 20 "$BIN" --no-sandbox --user-data-dir="$TMP/ru9" --headless --dump-dom --crash-dumps-dir="$TMP/cd" "$PAGE" >/dev/null 2>&1; echo "crash exit=$?" >&2; ls -R "$TMP/cd" 2>/dev/null | head -10 >&2
   if [ -s "$ROOT/Engine.pristine/chrome.exe" ] && [ -s "$ROOT/Engine.pristine/chrome.dll" ]; then
     echo "pristine probe:" >&2
     ( cd "$ROOT/Engine.pristine" && timeout 90 ./chrome.exe --no-sandbox --user-data-dir="$TMP/rp" --headless --dump-dom "$PAGE" >"$TMP/pq.out" 2>"$TMP/pq.err"; echo "  pristine headless exit=$? out=$(wc -c <"$TMP/pq.out") err=[$(head -c 300 "$TMP/pq.err" | tr '\n' ' ')]" >&2 )
