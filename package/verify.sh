@@ -142,6 +142,12 @@ MINGW* | MSYS* | CYGWIN*)
     >"$TMP/p3.out" 2>"$TMP/p3.err"
   echo "probe-render exit=$? out=[$(grep -o '{"canvas"[^}]*}' "$TMP/p3.out" | head -1)] err=[$(head -c 200 "$TMP/p3.err")]" >&2
   echo "probe-with-env: $(HOME="$TMP/rh" TMPDIR="$TMP/rh" "$BIN" --version >/dev/null 2>&1; echo $?)" >&2
+  try() { local lbl=$1; shift; timeout 60 "$BIN" "$@" >"$TMP/x.out" 2>"$TMP/x.err"; echo "probe[$lbl] exit=$? out=$(wc -c <"$TMP/x.out") err=[$(head -c 130 "$TMP/x.err" | tr '\n' ' ')]" >&2; }
+  try v --version
+  try hl --headless=new --version
+  try dom --dump-dom "$PAGE"
+  try hldom --headless=new --dump-dom "$PAGE"
+  try udd --no-sandbox --user-data-dir="$TMP/ru3" --headless=new --dump-dom "$PAGE"
   ;;
 esac
 
