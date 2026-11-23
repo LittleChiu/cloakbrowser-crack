@@ -137,6 +137,11 @@ MINGW* | MSYS* | CYGWIN*)
   echo "probe-bash exit=$? out=[$(head -c 120 "$TMP/p1.out")] err=[$(head -c 200 "$TMP/p1.err")]" >&2
   cmd //c "\"$(cygpath -w "$BIN")\" --version" >"$TMP/p2.out" 2>&1
   echo "probe-cmd exit=$? out=[$(head -c 160 "$TMP/p2.out")]" >&2
+  "$BIN" --user-data-dir="$TMP/ru" --headless=new --dump-dom --no-sandbox \
+    --no-first-run --virtual-time-budget=2000 --fingerprint=111222 "$PAGE" \
+    >"$TMP/p3.out" 2>"$TMP/p3.err"
+  echo "probe-render exit=$? out=[$(grep -o '{"canvas"[^}]*}' "$TMP/p3.out" | head -1)] err=[$(head -c 200 "$TMP/p3.err")]" >&2
+  echo "probe-with-env: $(HOME="$TMP/rh" TMPDIR="$TMP/rh" "$BIN" --version >/dev/null 2>&1; echo $?)" >&2
   ;;
 esac
 
