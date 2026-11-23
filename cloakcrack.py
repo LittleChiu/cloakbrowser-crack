@@ -697,6 +697,9 @@ def _walk_back(b: Bin, ret_va: int, span: int = 0x60) -> int:
     return va + 1 if va + 1 <= ret_va else ret_va
 
 
+LINEAR_RET_REACH = 0x10000  # last-resort straight-line hunt for a return
+
+
 def epilogue_after(b: Bin, site: int, cap: int = 0x3000) -> int | None:
     """First return path at or after `site`: either a ret (return the start of
     its restore sequence) or an unconditional branch to one."""
@@ -777,7 +780,18 @@ def epilogue_after(b: Bin, site: int, cap: int = 0x3000) -> int | None:
                     break
         if not moved:
             break
-    return _walk_back(b, last) if last else None
+    if last:
+        return _walk_back(b, last)
+    # Some blocks live in a computed-goto maze (156 turned one into a ~32 KB
+    # dispatcher) that neither returns nor reaches padding inside the walk
+    # budget, and the maze's last jmp can even point backwards.  Nothing needs
+    # the *matching* epilogue, only one that aborts the enclosing function, so
+    # fall back to the nearest ret in a plain linear sweep.
+    far = min(seg.addr + seg.size, site + LINEAR_RET_REACH)
+    for cur, _w, _t in insns(b, site, far - site):
+        if is_ret(b, cur):
+            return _walk_back(b, cur)
+    return None
 
 
 def head_insns(b: Bin, start: int, count: int) -> list[tuple[int, bytes]]:

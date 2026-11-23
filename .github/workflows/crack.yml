@@ -218,9 +218,21 @@ jobs:
       - name: fetch engine
         run: |
           set -euo pipefail
+          # diag starts alongside the macOS leg, so it competes for the single
+          # download seat and must retry like every other job does
+          dl() {
+            local url=$1 out=$2
+            for i in 1 2 3 4 5; do
+              code=$(curl -sSL --retry 3 -H "Authorization: Bearer $CB_KEY" \
+                -H "X-Platform: linux-x64" -o "$out.tmp" -w '%{http_code}' "$url" || echo 000)
+              if [ "$code" = 200 ]; then mv "$out.tmp" "$out"; return 0; fi
+              echo "download linux-x64 -> HTTP $code (attempt $i)"
+              sleep $((i * 15))
+            done
+            return 1
+          }
           ver=$(curl -fsS -H "X-Platform: linux-x64" https://cloakbrowser.dev/api/download/version | sed 's/.*"version":"\([^"]*\)".*/\1/')
-          curl -fsSL -H "Authorization: Bearer $CB_KEY" -H "X-Platform: linux-x64" \
-            -o e.tar.gz "https://cloakbrowser.dev/api/download/$ver"
+          dl "https://cloakbrowser.dev/api/download/$ver" e.tar.gz
           mkdir engine && tar xzf e.tar.gz -C engine && chmod +x engine/chrome
       - name: probe
         run: |
