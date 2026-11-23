@@ -75,7 +75,9 @@ jobs:
           [ -n "$tag" ] || { echo "no dmg asset in the latest release"; exit 1; }
           curl -fsSL --retry 5 --retry-all-errors -o manager.dmg \
             "https://github.com/CloakHQ/CloakBrowser-Manager/releases/latest/download/$tag"
-          ver=${ENGINE_VERSION:-$(curl -fsS https://cloakbrowser.dev/api/download/version | sed 's/.*"version":"\([^"]*\)".*/\1/')}
+          # the version endpoint is per-platform: without X-Platform it falls
+          # back to a stale default and the build silently ships an old engine
+          ver=${ENGINE_VERSION:-$(curl -fsS -H "X-Platform: ${{ matrix.target }}" https://cloakbrowser.dev/api/download/version | sed 's/.*"version":"\([^"]*\)".*/\1/')}
           echo "engine_version=$ver" >> "$GITHUB_OUTPUT"
           echo "engine $ver / ${{ matrix.target }}"
           dl "https://cloakbrowser.dev/api/download/$ver" ${{ matrix.target }} engine.tar.gz
@@ -140,7 +142,7 @@ jobs:
             echo "download $plat failed" >&2
             return 1
           }
-          ver=$(curl -fsS https://cloakbrowser.dev/api/download/version | sed 's/.*"version":"\([^"]*\)".*/\1/')
+          ver=$(curl -fsS -H "X-Platform: windows-x64" https://cloakbrowser.dev/api/download/version | sed 's/.*"version":"\([^"]*\)".*/\1/')
           [ -n "$ENGINE_VERSION" ] && ver=$ENGINE_VERSION
           echo "engine $ver"
           dl "https://cloakbrowser.dev/api/download/$ver" windows-x64 engine.zip
@@ -216,7 +218,7 @@ jobs:
       - name: fetch engine
         run: |
           set -euo pipefail
-          ver=$(curl -fsS https://cloakbrowser.dev/api/download/version | sed 's/.*"version":"\([^"]*\)".*/\1/')
+          ver=$(curl -fsS -H "X-Platform: linux-x64" https://cloakbrowser.dev/api/download/version | sed 's/.*"version":"\([^"]*\)".*/\1/')
           curl -fsSL -H "Authorization: Bearer $CB_KEY" -H "X-Platform: linux-x64" \
             -o e.tar.gz "https://cloakbrowser.dev/api/download/$ver"
           mkdir engine && tar xzf e.tar.gz -C engine && chmod +x engine/chrome
@@ -306,7 +308,7 @@ jobs:
             done
             return 1
           }
-          ver=${ENGINE_VERSION:-$(curl -fsS https://cloakbrowser.dev/api/download/version | sed 's/.*"version":"\([^"]*\)".*/\1/')}
+          ver=${ENGINE_VERSION:-$(curl -fsS -H "X-Platform: $TARGET" https://cloakbrowser.dev/api/download/version | sed 's/.*"version":"\([^"]*\)".*/\1/')}
           dl "https://cloakbrowser.dev/api/download/$ver" "$TARGET" engine.tar.gz
           mkdir engine && tar xzf engine.tar.gz -C engine
           chmod +x engine/chrome
@@ -374,7 +376,7 @@ jobs:
           ver=${{ inputs.version || needs.macos.outputs.engine_version }}
           # windows-only builds skip macos, which is where the engine version
           # is normally resolved; fall back to the API like the other jobs do
-          [ -n "$ver" ] || ver=$(curl -fsS https://cloakbrowser.dev/api/download/version | sed 's/.*"version":"\([^"]*\)".*/\1/')
+          [ -n "$ver" ] || ver=$(curl -fsS -H "X-Platform: darwin-arm64" https://cloakbrowser.dev/api/download/version | sed 's/.*"version":"\([^"]*\)".*/\1/')
           # the same engine version can be rebuilt: roll crack.<n> instead of
           # colliding with a taken tag
           n=1

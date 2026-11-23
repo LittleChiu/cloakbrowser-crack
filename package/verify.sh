@@ -9,8 +9,9 @@
 #   Engine/chrome.exe                      (Windows)
 #
 # Two headless renders with the same seed must produce the same canvas hash and
-# a different seed must change it; without the patch the first run exits 77
-# (missing key) long before any DOM is dumped.
+# a different seed must change it; without the patch the first run dies with a
+# licence exit code (76-79: seat / missing key / transport / rejected) long
+# before any DOM is dumped.
 set -uo pipefail
 
 ROOT=${1:?usage: verify.sh <engine-root>}

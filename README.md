@@ -8,8 +8,9 @@ per-release constants, no vendor licence server.
 
 ## What the crack does
 
-The engine's licence path ends by calling `exit(77)` (no key) or `exit(79)`
-(rejected). Every denial therefore tears the process down. Instead of re-implementing
+The engine's licence path ends by calling `exit(76)` (seat limit), `exit(77)`
+(missing key), `exit(78)` (transport) or `exit(79)` (rejected). Every denial
+therefore tears the process down. Instead of re-implementing
 the licence logic, the tool rewrites each of those `exit` call sites into a
 `jmp` to the function epilogue, so the caller returns *early* and execution
 continues with the default "unlicensed" state already in the registers. Nothing is
@@ -116,6 +117,9 @@ Two more things the launcher does so a *launch*, not just the manager, comes up:
   fail guarantees the manager never reads `77` (missing key) out of a file and
   aborts a perfectly good launch. Launches are then judged by CDP alone.
 
+None of the codes is asserted on: the patch rewrites the `bl`/`call` sites, so a
+build that adds or renumbers a code (130→156 added `78`) is still covered.
+
 On Windows the launcher also prefers `Engine/chrome.real.exe` over the shipped
 `Engine/chrome.exe`. The latter is only a licence injector that re-executes
 `.real`, and the re-exec drops the inherited `--remote-debugging-pipe`
@@ -190,3 +194,8 @@ PE path relies on the indirect-call + `int3` terminating rule and was validated
 statically). The Linux arm64 path was validated end to end locally on a native
 aarch64 container: pristine exits `77`, patched renders (exit `0`), `verify.sh`
 passes.
+
+Latest validated build: engine `156.0.8078.47.1` with manager `v0.2.2` on
+macOS arm64 (keyless launch, `tier=pro`, CDP serves `Chrome/156`, persona reports
+a seed-derived `M3 Pro` and hardware concurrency). Pristine 156 denies with the
+new transport code `78`, which the derived patch defuses like any other site.
