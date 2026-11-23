@@ -176,6 +176,9 @@ jobs:
           ls app
           tail -20 "$TEMP/inno.log" 2>/dev/null || true
 
+      - name: keep a pristine engine for the probe
+        run: cp -R app/Engine app/Engine.pristine
+
       - name: derive patch plan
         run: |
           set -euo pipefail

@@ -148,6 +148,12 @@ MINGW* | MSYS* | CYGWIN*)
   try dom --dump-dom "$PAGE"
   try hldom --headless --dump-dom "$PAGE"
   try udd --no-sandbox --user-data-dir="$TMP/ru3" --headless --dump-dom "$PAGE"
+  try log --no-sandbox --user-data-dir="$TMP/ru4" --enable-logging=stderr --v=1 --headless --dump-dom "$PAGE"
+  try old --no-sandbox --user-data-dir="$TMP/ru5" --headless=old --dump-dom "$PAGE"
+  if [ -s "$ROOT/Engine.pristine/chrome.exe" ] && [ -s "$ROOT/Engine.pristine/chrome.dll" ]; then
+    echo "pristine probe:" >&2
+    ( cd "$ROOT/Engine.pristine" && timeout 90 ./chrome.exe --no-sandbox --user-data-dir="$TMP/rp" --headless --dump-dom "$PAGE" >"$TMP/pq.out" 2>"$TMP/pq.err"; echo "  pristine headless exit=$? out=$(wc -c <"$TMP/pq.out") err=[$(head -c 300 "$TMP/pq.err" | tr '\n' ' ')]" >&2 )
+  fi
   ;;
 esac
 
