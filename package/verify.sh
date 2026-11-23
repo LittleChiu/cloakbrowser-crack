@@ -129,6 +129,17 @@ render() { # seed -> canvas hash
   return 0
 }
 
+case "$(uname -s)" in
+MINGW* | MSYS* | CYGWIN*)
+  # diagnose an exec failure: bash exec and cmd exec side by side
+  echo "probe bin: $(cygpath -w "$BIN")" >&2
+  "$BIN" --version >"$TMP/p1.out" 2>"$TMP/p1.err"
+  echo "probe-bash exit=$? out=[$(head -c 120 "$TMP/p1.out")] err=[$(head -c 200 "$TMP/p1.err")]" >&2
+  cmd //c "\"$(cygpath -w "$BIN")\" --version" >"$TMP/p2.out" 2>&1
+  echo "probe-cmd exit=$? out=[$(head -c 160 "$TMP/p2.out")]" >&2
+  ;;
+esac
+
 fail=0
 a=$(render 111222)
 [ -n "$a" ] || {
